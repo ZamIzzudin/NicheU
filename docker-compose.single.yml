@@ -1,5 +1,5 @@
-# Single container only (MongoDB external / Atlas)
-# Publishes only web dashboard port to host.
+# Single container + external Mongo
+# Public port: 3000 only
 
 services:
   niche-daily:
@@ -9,13 +9,13 @@ services:
     image: niche-daily:latest
     restart: unless-stopped
     ports:
-      - "${HOST_WEB_PORT:-3001}:3001"
+      - "${HOST_WEB_PORT:-3000}:3000"
     env_file:
       - .env
     environment:
-      PORT: 3000
-      WEB_PORT: 3001
-      API_PORT: 3000
+      API_PORT: 4000
+      PORT: 4000
+      WEB_PORT: 3000
       WHATSAPP_AUTH_DIR: /app/whatsapp_auth
     volumes:
       - niche_wa_auth:/app/whatsapp_auth

@@ -1,9 +1,6 @@
-# Niche Daily on Dokploy / Docker
-# Single app image (API+Web) + MongoDB
-#
-# IMPORTANT: only publish WEB port (3001) to the host.
-# API stays on container-local :3000 and is reached via Next rewrite (/api/*).
-# This avoids "Bind for 0.0.0.0:3000 failed: port is already allocated".
+# Niche Daily — Dokploy friendly
+# ONE public port: 3000 (Web UI + /api proxy)
+# API listens internally on 4000 only.
 
 services:
   mongo:
@@ -27,9 +24,8 @@ services:
       mongo:
         condition: service_healthy
     ports:
-      # Public dashboard only (Dokploy domain → this port)
-      - "${HOST_WEB_PORT:-3001}:3001"
-      # API is NOT published on host by default (internal 127.0.0.1:3000 inside container)
+      # Dokploy domain must target this container port
+      - "${HOST_WEB_PORT:-3000}:3000"
     environment:
       MONGODB_URI: mongodb://mongo:27017/niche-daily
       API_BASE_URL: ${API_BASE_URL:-https://api.openai.com/v1}
@@ -38,9 +34,11 @@ services:
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
       AUTHORIZED_PHONE: ${AUTHORIZED_PHONE}
       API_TOKEN: ${API_TOKEN:-change-me}
-      PORT: 3000
-      WEB_PORT: 3001
-      API_PORT: 3000
+      # Internal API port (not published)
+      API_PORT: 4000
+      PORT: 4000
+      # Public web port (Dokploy domain)
+      WEB_PORT: 3000
       TIMEZONE: ${TIMEZONE:-Asia/Jakarta}
       ENABLE_QUIET_HOURS: ${ENABLE_QUIET_HOURS:-true}
       QUIET_HOURS_START: ${QUIET_HOURS_START:-23:30}
@@ -63,12 +61,15 @@ services:
           "CMD",
           "node",
           "-e",
-          "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+          "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))",
         ]
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 40s
+      start_period: 60s
+    labels:
+      # Helpful for Traefik-based platforms (Dokploy may also set its own labels)
+      - traefik.enable=true
 
 volumes:
   niche_mongo_data:

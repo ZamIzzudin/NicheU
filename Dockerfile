@@ -73,12 +73,14 @@ RUN sed -i 's/\r$//' ./start.sh \
   && chmod +x ./start.sh \
   && mkdir -p /app/whatsapp_auth /app/server/domain/persona
 
-EXPOSE 3000 3001
+# Public entry is WEB on 3000 (Dokploy-friendly).
+# API is internal-only on 4000.
+EXPOSE 3000
 VOLUME ["/app/whatsapp_auth"]
 
-ENV PORT=3000 \
-    WEB_PORT=3001 \
-    API_PORT=3000 \
+ENV PORT=4000 \
+    API_PORT=4000 \
+    WEB_PORT=3000 \
     WHATSAPP_AUTH_DIR=/app/whatsapp_auth \
     NODE_ENV=production
 

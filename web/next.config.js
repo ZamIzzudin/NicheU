@@ -2,7 +2,8 @@
 const nextConfig = {
   reactStrictMode: true,
   async rewrites() {
-    // Do NOT use process.env.PORT here: Next sets PORT to the web port (3001).
+    // API is private inside container (default 4000 in Docker; 3000 in local dev).
+    // Do NOT use process.env.PORT — Next overwrites it with the web listen port.
     const apiPort = process.env.API_PORT || process.env.BACKEND_PORT || 3000;
     return [
       {
