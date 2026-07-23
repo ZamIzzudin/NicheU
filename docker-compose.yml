@@ -1,0 +1,69 @@
+# Niche Daily on Dokploy / Docker
+# Single app image (API+Web) + MongoDB
+
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    volumes:
+      - niche_mongo_data:/data/db
+    # optional: expose only inside compose network
+    # ports:
+    #   - "27017:27017"
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  niche-daily:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: niche-daily:latest
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+    ports:
+      # Public dashboard (Dokploy domain should point here ideally)
+      - "3001:3001"
+      # API direct (optional; web already proxies /api)
+      - "3000:3000"
+    environment:
+      # --- required secrets: set in Dokploy env UI ---
+      MONGODB_URI: mongodb://mongo:27017/niche-daily
+      API_BASE_URL: ${API_BASE_URL:-https://api.openai.com/v1}
+      API_KEY: ${API_KEY}
+      API_MODEL: ${API_MODEL:-gpt-4o-mini}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+      AUTHORIZED_PHONE: ${AUTHORIZED_PHONE}
+      API_TOKEN: ${API_TOKEN:-change-me}
+      PORT: 3000
+      WEB_PORT: 3001
+      API_PORT: 3000
+      TIMEZONE: ${TIMEZONE:-Asia/Jakarta}
+      ENABLE_QUIET_HOURS: ${ENABLE_QUIET_HOURS:-true}
+      QUIET_HOURS_START: ${QUIET_HOURS_START:-23:30}
+      QUIET_HOURS_END: ${QUIET_HOURS_END:-06:30}
+      PROACTIVE_MIN_INTERVAL_SEC: ${PROACTIVE_MIN_INTERVAL_SEC:-120}
+      PROACTIVE_MAX_PER_DAY: ${PROACTIVE_MAX_PER_DAY:-40}
+      SCHEDULE_TICK_MS: ${SCHEDULE_TICK_MS:-30000}
+      MEMORY_IMPORTANCE_THRESHOLD: ${MEMORY_IMPORTANCE_THRESHOLD:-0.7}
+      MEMORY_RETRIEVAL_LIMIT: ${MEMORY_RETRIEVAL_LIMIT:-5}
+      HISTORY_MAX_MESSAGES: ${HISTORY_MAX_MESSAGES:-24}
+      WHATSAPP_AUTH_DIR: /app/whatsapp_auth
+      ALLOW_LID_OWNER_FALLBACK: ${ALLOW_LID_OWNER_FALLBACK:-true}
+    volumes:
+      # Keep WhatsApp session across redeploys
+      - niche_wa_auth:/app/whatsapp_auth
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+volumes:
+  niche_mongo_data:
+  niche_wa_auth:

@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.env
+*.log
+.DS_Store
+whatsapp_auth/
+web/node_modules/
+web/.next/
+web/build/
+web/.git/
+**/*.js.map
