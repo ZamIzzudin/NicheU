@@ -1,5 +1,9 @@
 # Niche Daily on Dokploy / Docker
 # Single app image (API+Web) + MongoDB
+#
+# IMPORTANT: only publish WEB port (3001) to the host.
+# API stays on container-local :3000 and is reached via Next rewrite (/api/*).
+# This avoids "Bind for 0.0.0.0:3000 failed: port is already allocated".
 
 services:
   mongo:
@@ -7,9 +11,6 @@ services:
     restart: unless-stopped
     volumes:
       - niche_mongo_data:/data/db
-    # optional: expose only inside compose network
-    # ports:
-    #   - "27017:27017"
     healthcheck:
       test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
       interval: 10s
@@ -26,12 +27,10 @@ services:
       mongo:
         condition: service_healthy
     ports:
-      # Public dashboard (Dokploy domain should point here ideally)
-      - "3001:3001"
-      # API direct (optional; web already proxies /api)
-      - "3000:3000"
+      # Public dashboard only (Dokploy domain → this port)
+      - "${HOST_WEB_PORT:-3001}:3001"
+      # API is NOT published on host by default (internal 127.0.0.1:3000 inside container)
     environment:
-      # --- required secrets: set in Dokploy env UI ---
       MONGODB_URI: mongodb://mongo:27017/niche-daily
       API_BASE_URL: ${API_BASE_URL:-https://api.openai.com/v1}
       API_KEY: ${API_KEY}
@@ -46,8 +45,10 @@ services:
       ENABLE_QUIET_HOURS: ${ENABLE_QUIET_HOURS:-true}
       QUIET_HOURS_START: ${QUIET_HOURS_START:-23:30}
       QUIET_HOURS_END: ${QUIET_HOURS_END:-06:30}
-      PROACTIVE_MIN_INTERVAL_SEC: ${PROACTIVE_MIN_INTERVAL_SEC:-120}
-      PROACTIVE_MAX_PER_DAY: ${PROACTIVE_MAX_PER_DAY:-40}
+      PROACTIVE_MIN_INTERVAL_SEC: ${PROACTIVE_MIN_INTERVAL_SEC:-300}
+      PROACTIVE_MAX_PER_DAY: ${PROACTIVE_MAX_PER_DAY:-12}
+      PROACTIVE_MAX_OVERDUE_MIN: ${PROACTIVE_MAX_OVERDUE_MIN:-8}
+      USER_BUBBLE_DEBOUNCE_SEC: ${USER_BUBBLE_DEBOUNCE_SEC:-120}
       SCHEDULE_TICK_MS: ${SCHEDULE_TICK_MS:-30000}
       MEMORY_IMPORTANCE_THRESHOLD: ${MEMORY_IMPORTANCE_THRESHOLD:-0.7}
       MEMORY_RETRIEVAL_LIMIT: ${MEMORY_RETRIEVAL_LIMIT:-5}
@@ -55,10 +56,15 @@ services:
       WHATSAPP_AUTH_DIR: /app/whatsapp_auth
       ALLOW_LID_OWNER_FALLBACK: ${ALLOW_LID_OWNER_FALLBACK:-true}
     volumes:
-      # Keep WhatsApp session across redeploys
       - niche_wa_auth:/app/whatsapp_auth
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
       interval: 30s
       timeout: 10s
       retries: 5
