@@ -1,6 +1,6 @@
 {
   "name": "niche-daily",
-  "version": "2.0.0",
+  "version": "1.0.0",
   "description": "Niche Daily - Partner-like AI WhatsApp agent with daily life, memory, and self-extending tools",
   "main": "dist/server/index.js",
   "scripts": {
