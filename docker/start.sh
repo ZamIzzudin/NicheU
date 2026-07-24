@@ -65,7 +65,9 @@ else
   NEXT_BIN=./node_modules/next/dist/bin/next
 fi
 
-"$NEXT_BIN" start -H 0.0.0.0 -p "$WEB_PORT" &
+# Do not let Next inherit PORT=API_PORT (would confuse logs/tools).
+# Rewrite target was baked at image build (API_PORT=4000).
+PORT="$WEB_PORT" API_PORT="$API_PORT" "$NEXT_BIN" start -H 0.0.0.0 -p "$WEB_PORT" &
 WEB_PID=$!
 
 # Wait web (max ~60s)

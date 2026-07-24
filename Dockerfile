@@ -40,7 +40,11 @@ COPY --from=web-deps /app/web/node_modules ./web/node_modules
 COPY web ./web
 COPY shared ./shared
 WORKDIR /app/web
-ENV NODE_ENV=production
+# Bake API rewrite destination into Next production build.
+# Runtime env alone is NOT enough: next.config rewrites() run at build time.
+ENV NODE_ENV=production \
+    API_PORT=4000 \
+    BACKEND_PORT=4000
 RUN npm run build
 
 # ---------- runtime ----------
