@@ -3,7 +3,7 @@ import { ToolDefinition, ToolResult } from '../../core/types';
 import { Database } from '../../db/mongo';
 import { runToolCode, assertSafeCode } from './sandbox';
 import { duckDuckGoSearch } from '../../integrations/search/duckduckgo';
-import { randomId } from '../../utils/time';
+import { formatDateInTz, formatTimeInTz, randomId } from '../../utils/time';
 
 type ExecContext = {
   userId?: string;
@@ -22,6 +22,27 @@ type ExecContext = {
     getToday: (userId: string) => Promise<unknown>;
     formatContext: (mood: any) => string;
     setMood: (userId: string, input: any) => Promise<unknown>;
+  };
+  reminderService?: {
+    createFromNatural: (input: {
+      userId: string;
+      text: string;
+      when: string;
+      sourceText?: string;
+    }) => Promise<any>;
+    create: (input: {
+      userId: string;
+      text: string;
+      dueAt: Date;
+      rawWhen?: string;
+      sourceText?: string;
+    }) => Promise<any>;
+    list: (userId: string, options?: any) => Promise<any[]>;
+    cancel: (userId: string, reminderId: string) => Promise<any>;
+    cancelAllPending: (userId: string) => Promise<number>;
+    formatConfirm: (reminder: any) => string;
+    formatActiveContext: (reminders: any[]) => string;
+    parseWhen: (when: string, sourceText?: string) => Promise<Date>;
   };
 };
 
@@ -231,6 +252,27 @@ export class ToolRegistry {
 
   private builtinRuntime(name: string) {
     const map: Record<string, (args: Record<string, unknown>, ctx?: ExecContext) => Promise<unknown>> = {
+      get_current_time: async () => {
+        const { buildClockContext } = await import('../../utils/time');
+        const clock = buildClockContext();
+        return {
+          success: true,
+          timezone: clock.timezone,
+          date: clock.date,
+          time: clock.time,
+          hour: clock.hour,
+          minute: clock.minute,
+          period: clock.period,
+          periodLabel: clock.periodLabel,
+          weekday: clock.weekday,
+          longDate: clock.longDate,
+          quietHours: clock.quietHours,
+          greeting: clock.greeting,
+          behaviorHint: clock.behaviorHint,
+          antiPatterns: clock.antiPatterns,
+          summary: `Sekarang ${clock.longDate}, jam ${clock.time} (${clock.periodLabel}) di ${clock.timezone}.`,
+        };
+      },
       web_search: async (args) => {
         const query = String(args.query || '');
         const limit = Number(args.limit || 5);
@@ -262,6 +304,82 @@ export class ToolRegistry {
           context: ctx.moodService.formatContext(mood),
           mood,
         };
+      },
+      set_reminder: async (args, ctx) => {
+        const userId = ctx?.userId;
+        if (!userId || !ctx?.reminderService) {
+          return { success: false, error: 'No reminder context' };
+        }
+        const text = String(args.text || args.message || '').trim();
+        const when = String(args.when || args.time || '').trim();
+        if (!text) return { success: false, error: 'text required (what to remind)' };
+        if (!when) {
+          return {
+            success: false,
+            error: 'when required, e.g. "15 menit lagi", "jam 20:00", "besok jam 8"',
+          };
+        }
+        try {
+          const reminder = await ctx.reminderService.createFromNatural({
+            userId,
+            text,
+            when,
+            sourceText: args.source_text ? String(args.source_text) : undefined,
+          });
+          return {
+            success: true,
+            reminder: {
+              id: reminder.id,
+              text: reminder.text,
+              dueAt: reminder.dueAt,
+              status: reminder.status,
+              localDue: `${formatDateInTz(new Date(reminder.dueAt))} ${formatTimeInTz(new Date(reminder.dueAt))}`,
+            },
+            confirmHint: ctx.reminderService.formatConfirm(reminder),
+            note: 'Reminder is EPHEMERAL (not long-term memory). It will fire once then leave active context.',
+          };
+        } catch (error: any) {
+          return { success: false, error: error?.message || String(error) };
+        }
+      },
+      list_reminders: async (args, ctx) => {
+        const userId = ctx?.userId;
+        if (!userId || !ctx?.reminderService) {
+          return { success: false, error: 'No reminder context' };
+        }
+        const status = (args.status as string) || 'active';
+        const reminders = await ctx.reminderService.list(userId, {
+          status: status as any,
+          limit: Number(args.limit || 20),
+        });
+        const { formatDateInTz, formatTimeInTz } = await import('../../utils/time');
+        return {
+          success: true,
+          count: reminders.length,
+          reminders: reminders.map((r: any) => ({
+            id: r.id,
+            text: r.text,
+            status: r.status,
+            dueAt: r.dueAt,
+            localDue: `${formatDateInTz(new Date(r.dueAt))} ${formatTimeInTz(new Date(r.dueAt))}`,
+          })),
+          context: ctx.reminderService.formatActiveContext(reminders),
+        };
+      },
+      cancel_reminder: async (args, ctx) => {
+        const userId = ctx?.userId;
+        if (!userId || !ctx?.reminderService) {
+          return { success: false, error: 'No reminder context' };
+        }
+        if (args.all === true || String(args.reminder_id || '').toLowerCase() === 'all') {
+          const n = await ctx.reminderService.cancelAllPending(userId);
+          return { success: true, cancelled: n, message: `Cancelled ${n} pending reminders` };
+        }
+        const id = String(args.reminder_id || args.id || '').trim();
+        if (!id) return { success: false, error: 'reminder_id required (or all=true)' };
+        const rem = await ctx.reminderService.cancel(userId, id);
+        if (!rem) return { success: false, error: 'Reminder not found' };
+        return { success: true, reminder: { id: rem.id, status: rem.status, text: rem.text } };
       },
       remember_fact: async (args, ctx) => {
         const userId = ctx?.userId;
@@ -329,6 +447,18 @@ export class ToolRegistry {
   private async ensureBuiltinTools() {
     const builtins: Array<Omit<Tool, 'createdAt' | 'updatedAt'>> = [
       {
+        id: 'builtin_get_current_time',
+        name: 'get_current_time',
+        description:
+          'Get accurate local date/time, day period (pagi/siang/sore/malam), timezone, and greeting hints. Use when unsure about current time-of-day.',
+        category: 'system',
+        functionCode: 'async function execute() { return {}; }',
+        parameters: [],
+        enabled: true,
+        builtin: true,
+        source: 'builtin',
+      },
+      {
         id: 'builtin_web_search',
         name: 'web_search',
         description: 'Search the web via DuckDuckGo for fresh information',
@@ -345,7 +475,7 @@ export class ToolRegistry {
       {
         id: 'builtin_get_my_schedule',
         name: 'get_my_schedule',
-        description: 'Get my daily activities/schedule and current status',
+        description: 'Get my daily activities/schedule and current status relative to now',
         category: 'system',
         functionCode: 'async function execute() { return {}; }',
         parameters: [],
@@ -376,9 +506,85 @@ export class ToolRegistry {
         source: 'builtin',
       },
       {
+        id: 'builtin_set_reminder',
+        name: 'set_reminder',
+        description:
+          'Set a one-shot timed reminder (INGATKAN). Use when user says ingatkan/remind/nanti ingetin. This is NOT long-term memory — fires once then leaves context.',
+        category: 'productivity',
+        functionCode: 'async function execute(params) { return params; }',
+        parameters: [
+          {
+            name: 'text',
+            type: 'string',
+            description: 'What to remind about (short)',
+            required: true,
+          },
+          {
+            name: 'when',
+            type: 'string',
+            description:
+              'When: natural language relative or absolute, e.g. "15 menit lagi", "1 jam lagi", "jam 20:00", "besok jam 8"',
+            required: true,
+          },
+          {
+            name: 'source_text',
+            type: 'string',
+            description: 'Original user message (optional, helps parsing)',
+            required: false,
+          },
+        ],
+        enabled: true,
+        builtin: true,
+        source: 'builtin',
+      },
+      {
+        id: 'builtin_list_reminders',
+        name: 'list_reminders',
+        description: 'List active (or all) timed reminders for the user',
+        category: 'productivity',
+        functionCode: 'async function execute() { return {}; }',
+        parameters: [
+          {
+            name: 'status',
+            type: 'string',
+            description: 'active|pending|sent|cancelled|all (default active)',
+            required: false,
+          },
+          { name: 'limit', type: 'number', description: 'Max items', required: false },
+        ],
+        enabled: true,
+        builtin: true,
+        source: 'builtin',
+      },
+      {
+        id: 'builtin_cancel_reminder',
+        name: 'cancel_reminder',
+        description: 'Cancel a pending reminder by id, or cancel all pending',
+        category: 'productivity',
+        functionCode: 'async function execute(params) { return params; }',
+        parameters: [
+          {
+            name: 'reminder_id',
+            type: 'string',
+            description: 'Reminder id from list_reminders (or "all")',
+            required: false,
+          },
+          {
+            name: 'all',
+            type: 'boolean',
+            description: 'If true, cancel all pending reminders',
+            required: false,
+          },
+        ],
+        enabled: true,
+        builtin: true,
+        source: 'builtin',
+      },
+      {
         id: 'builtin_remember_fact',
         name: 'remember_fact',
-        description: 'Store an important long-term memory about the user',
+        description:
+          'Store an important LONG-TERM memory about the user. Do NOT use for timed reminders ("ingatkan saya"); use set_reminder instead.',
         category: 'system',
         functionCode: 'async function execute({ content }) { return { content }; }',
         parameters: [

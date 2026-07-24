@@ -23,6 +23,29 @@ export type ProactiveType =
 
 export type ProactiveStatus = 'pending' | 'sending' | 'sent' | 'cancelled' | 'failed';
 
+/** Ephemeral timed reminders — NOT long-term memories. Drop after sent/cancel. */
+export type ReminderStatus = 'pending' | 'sending' | 'sent' | 'cancelled' | 'failed';
+
+export interface Reminder {
+  _id?: string;
+  id: string;
+  userId: string;
+  /** What to remind about (short). */
+  text: string;
+  /** When to fire (absolute UTC Date). */
+  dueAt: Date;
+  status: ReminderStatus;
+  /** Original user phrasing, e.g. "15 menit lagi" / "jam 20:00". */
+  rawWhen?: string;
+  /** Optional source message snippet. */
+  sourceText?: string;
+  createdAt: Date;
+  updatedAt: Date;
+  sentAt?: Date;
+  cancelledAt?: Date;
+  error?: string;
+}
+
 export interface Memory {
   _id?: string;
   userId: string;
@@ -180,6 +203,8 @@ export interface ProactiveMessage {
 
 export interface ConversationState {
   userId: string;
+  /** Calendar day (YYYY-MM-DD in app timezone) this transcript belongs to. */
+  conversationDate?: string;
   messages: Array<{
     role: 'system' | 'user' | 'assistant' | 'tool';
     /** Text history preferred; multimodal parts allowed for vision turns. */
@@ -188,7 +213,11 @@ export interface ConversationState {
     tool_calls?: unknown[];
     name?: string;
   }>;
+  /** Rolling/soft summary within the same day if transcript got long. */
   summary?: string;
+  /** After nightly sleep: short carry-over from previous day (not full chat). */
+  previousDaySummary?: string;
+  lastConsolidatedDate?: string;
   updatedAt: Date;
 }
 

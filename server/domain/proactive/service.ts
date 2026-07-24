@@ -2,7 +2,7 @@ import { DailyMood, PersonaProfile, ProactiveMessage } from '../../../shared/typ
 import { Client } from '../../core/client';
 import { Database } from '../../db/mongo';
 import { env } from '../../config/env';
-import { isWithinQuietHours, nowParts } from '../../utils/time';
+import { buildClockContext, isWithinQuietHours } from '../../utils/time';
 import { ScheduleService } from '../schedule/service';
 import { MoodService } from '../mood/service';
 
@@ -176,7 +176,7 @@ export class ProactiveService {
       }
     }
 
-    const { time } = nowParts();
+    const clock = buildClockContext();
 
     const system = `Kamu menulis pesan WhatsApp proaktif singkat (1-3 bubble dipisah baris kosong) sebagai Nisa.
 WAJIB gaya chat harian:
@@ -185,9 +185,13 @@ WAJIB gaya chat harian:
 - elongasi (iyaa, sayangg, duluu), wkwk
 - jangan formal / essay AI
 - jangan bilang auto/scheduled
-Warnai tone dari mood, tapi jangan rusak gaya chat.`;
+Warnai tone dari mood, tapi jangan rusak gaya chat.
+WAJIB patuhi waktu: sekarang ${clock.periodLabel} jam ${clock.time}.
+JANGAN menyapa dengan periode yang salah (contoh dilarang: ${clock.antiPatterns.join(', ') || '-'}).
+${clock.behaviorHint}`;
 
-    const user = `Jam sekarang: ${time}
+    const user = `${clock.promptBlock}
+
 Tipe event: ${msg.type}
 Hint: ${msg.payload.textHint || '-'}
 Aktivitas: ${msg.payload.activityTitle || '-'}

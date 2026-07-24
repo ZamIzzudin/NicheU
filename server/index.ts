@@ -10,6 +10,7 @@ import { ScheduleService } from './domain/schedule/service';
 import { ConversationService } from './domain/conversation/service';
 import { ProactiveService } from './domain/proactive/service';
 import { MoodService } from './domain/mood/service';
+import { ReminderService } from './domain/reminder/service';
 import { WhatsAppBot } from './integrations/whatsapp/bot';
 import { JobScheduler } from './jobs/scheduler';
 import { createApiRouter } from './routes/api';
@@ -38,17 +39,23 @@ async function main() {
   const memoryService = new MemoryService(db, client);
   const personaService = new PersonaService(db, client);
   const scheduleService = new ScheduleService(db, client);
-  const conversationService = new ConversationService(db, client);
+  const conversationService = new ConversationService(db, client, memoryService);
   const moodService = new MoodService(db, client);
+  const reminderService = new ReminderService(db, client);
   const proactiveService = new ProactiveService(db, client, scheduleService, moodService);
   await proactiveService.init();
   console.log('✓ Proactive service ready\n');
+  console.log(
+    `🧠 Day memory: max ${env.dayHistoryMaxMessages || env.historyMaxMessages} turns/day; nightly sleep ${String(env.nightlyConsolidateHour).padStart(2, '0')}:${String(env.nightlyConsolidateMinute).padStart(2, '0')} ${env.timezone}`
+  );
+  console.log('⏰ Reminder collection ready (ephemeral, not long-term memory)\n');
 
   tools.setContext({
     memoryService,
     scheduleService,
     personaService,
     moodService,
+    reminderService,
   });
 
   console.log('📱 Starting WhatsApp bot...');
@@ -60,7 +67,8 @@ async function main() {
     scheduleService,
     conversationService,
     proactiveService,
-    moodService
+    moodService,
+    reminderService
   );
   await whatsappBot.start();
   console.log('✓ WhatsApp bot started\n');
@@ -71,10 +79,12 @@ async function main() {
     scheduleService,
     proactiveService,
     moodService,
+    conversationService,
+    reminderService,
     async (userId, text) => {
       if (!whatsappBot.isConnected()) return;
       await whatsappBot.sendToUser(userId, text);
-      console.log(`📤 Proactive -> ${userId}: ${text.slice(0, 80)}...`);
+      console.log(`📤 Outbound -> ${userId}: ${text.slice(0, 80)}...`);
     },
     () => env.authorizedPhone.replace(/\D/g, '')
   );
@@ -93,6 +103,8 @@ async function main() {
       personaService,
       scheduleService,
       moodService,
+      conversationService,
+      reminderService,
       whatsappBot,
       client,
     })

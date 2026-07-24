@@ -6,6 +6,7 @@ import {
   Memory,
   PersonaProfile,
   ProactiveMessage,
+  Reminder,
   Tool,
   ToolExecution,
 } from '../../shared/types';
@@ -23,6 +24,7 @@ export class Database {
   proactive!: Collection<ProactiveMessage>;
   conversations!: Collection<ConversationState>;
   moods!: Collection<DailyMood>;
+  reminders!: Collection<Reminder>;
   meta!: Collection<{ _id: string; value: unknown; updatedAt: Date }>;
 
   constructor(uri = env.mongodbUri) {
@@ -41,6 +43,7 @@ export class Database {
     this.proactive = this.db.collection<ProactiveMessage>('proactive_messages');
     this.conversations = this.db.collection<ConversationState>('conversations');
     this.moods = this.db.collection<DailyMood>('daily_moods');
+    this.reminders = this.db.collection<Reminder>('reminders');
     this.meta = this.db.collection('meta');
 
     await Promise.all([
@@ -56,6 +59,10 @@ export class Database {
       this.conversations.createIndex({ userId: 1 }, { unique: true }),
       this.moods.createIndex({ userId: 1, date: 1 }, { unique: true }),
       this.moods.createIndex({ userId: 1, updatedAt: -1 }),
+      this.reminders.createIndex({ id: 1 }, { unique: true }),
+      this.reminders.createIndex({ userId: 1, status: 1, dueAt: 1 }),
+      this.reminders.createIndex({ status: 1, dueAt: 1 }),
+      this.reminders.createIndex({ userId: 1, updatedAt: -1 }),
     ]);
   }
 

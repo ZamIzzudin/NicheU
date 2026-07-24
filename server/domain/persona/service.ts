@@ -174,7 +174,9 @@ Language can be Indonesian. If missing fields, invent gentle defaults for a warm
     memoryContext?: string;
     scheduleContext?: string;
     moodContext?: string;
+    reminderContext?: string;
     summary?: string;
+    timeContext?: string;
   }): string {
     const p = parts.persona;
     const isNisa = Boolean(
@@ -208,14 +210,22 @@ Aturan interaksi:
 1. Style canon + few-shot di atas WAJIB ditiru rasanya.
 2. Mood hanya mewarnai nada; jangan rusak gaya chat.
 3. Multipesan: baris kosong = bubble terpisah; max 2-5 bubble.
-4. Tools hanya jika perlu: web_search, get_my_schedule, get_my_mood, remember_fact, create_custom_tool, list_tools.
+4. Tools hanya jika perlu: get_current_time, set_reminder, list_reminders, cancel_reminder, web_search, get_my_schedule, get_my_mood, remember_fact, create_custom_tool, list_tools.
 5. Jangan bilang kamu AI kecuali ditanya langsung.
 6. Boleh inisiatif emosional natural (nanya kabar, nyambung aktivitas).
+7. WAKTU: patuhi blok "WAKTU SEKARANG". Kalau ragu jam/periode, panggil tool get_current_time. Jangan menyapa "malam" di sore, atau "pagi" di siang.
+8. PENGINGAT: kalau user bilang "ingatkan"/"remind"/"nanti ingetin" → WAJIB pakai set_reminder (bukan remember_fact / memory). Reminder ephemeral, sekali fire lalu hilang dari active context.
 
+${parts.timeContext ? `${parts.timeContext}\n` : ''}
 ${parts.moodContext ? `Mood harianmu sekarang:\n${parts.moodContext}` : ''}
-${parts.scheduleContext ? `Jadwal/aktivitas harianmu:\n${parts.scheduleContext}` : ''}
-${parts.memoryContext ? `Memori relevan tentang user:\n${parts.memoryContext}` : ''}
-${parts.summary ? `Ringkasan percakapan lama:\n${parts.summary}` : ''}`.trim();
+${parts.scheduleContext ? `Jadwal/aktivitas harianmu (bandingkan dengan jam SEKARANG di atas):\n${parts.scheduleContext}` : ''}
+${parts.reminderContext ? `${parts.reminderContext}\n` : ''}
+${parts.memoryContext ? `Memori jangka panjang relevan tentang user:\n${parts.memoryContext}` : ''}
+${parts.summary ? `Konteks dari ringkasan (kemarin/sebelumnya; detail remeh sudah dibersihkan saat "tidur"):\n${parts.summary}` : ''}
+
+Working memory:
+- Percakapan HARI INI (bubbles user/assistant) di history adalah konteks utama. Tetap nyambung seharian.
+- Malam hari sistem akan "tidur": detail tidak penting dibersihkan; hanya fakta penting masuk memori jangka panjang.`.trim();
   }
 
   confirmationMessage(persona: PersonaProfile): string {

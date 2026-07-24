@@ -6,9 +6,12 @@ import { MemoryService } from '../domain/memory/service';
 import { PersonaService } from '../domain/persona/service';
 import { ScheduleService } from '../domain/schedule/service';
 import { MoodService } from '../domain/mood/service';
+import { ConversationService } from '../domain/conversation/service';
+import { ReminderService } from '../domain/reminder/service';
 import { WhatsAppBot } from '../integrations/whatsapp/bot';
 import { Client } from '../core/client';
 import { MoodLabel } from '../../shared/types';
+import { buildClockContext } from '../utils/time';
 
 export function createApiRouter(deps: {
   db: Database;
@@ -17,6 +20,8 @@ export function createApiRouter(deps: {
   personaService: PersonaService;
   scheduleService: ScheduleService;
   moodService: MoodService;
+  conversationService: ConversationService;
+  reminderService: ReminderService;
   whatsappBot: WhatsAppBot;
   client: Client;
 }): Router {
@@ -28,6 +33,8 @@ export function createApiRouter(deps: {
     personaService,
     scheduleService,
     moodService,
+    conversationService,
+    reminderService,
     whatsappBot,
     client,
   } = deps;
@@ -67,11 +74,20 @@ export function createApiRouter(deps: {
     } catch {
       mongoHost = 'unparsed';
     }
+    const clock = buildClockContext();
     res.json({
       status: mongoOk && whatsappBot ? 'ok' : 'degraded',
       userId: uid,
       mongo: { ok: mongoOk, host: mongoHost, db: mongoDb },
       persona: { count: personaCount, forUser: personaForUser },
+      clock: {
+        timezone: clock.timezone,
+        date: clock.date,
+        time: clock.time,
+        period: clock.periodLabel,
+        longDate: clock.longDate,
+        quietHours: clock.quietHours,
+      },
       timestamp: new Date().toISOString(),
       gateway: {
         baseUrl: env.apiBaseUrl,
@@ -141,6 +157,64 @@ export function createApiRouter(deps: {
     }
   });
 
+  // Reminders (ephemeral — not long-term memory)
+  router.get('/reminders', async (req, res) => {
+    try {
+      const uid = (req.query.userId as string) || userId();
+      const status = (req.query.status as string) || 'active';
+      const reminders = await reminderService.list(uid, { status: status as any });
+      res.json({
+        reminders,
+        context: reminderService.formatActiveContext(reminders),
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  router.post('/reminders', async (req, res) => {
+    try {
+      const uid = userId();
+      const { text, when, dueAt } = req.body || {};
+      if (!text) return res.status(400).json({ error: 'text required' });
+      let reminder;
+      if (dueAt) {
+        reminder = await reminderService.create({
+          userId: uid,
+          text: String(text),
+          dueAt: new Date(dueAt),
+          rawWhen: when ? String(when) : undefined,
+        });
+      } else if (when) {
+        reminder = await reminderService.createFromNatural({
+          userId: uid,
+          text: String(text),
+          when: String(when),
+        });
+      } else {
+        return res.status(400).json({ error: 'when or dueAt required' });
+      }
+      res.status(201).json({ reminder, confirm: reminderService.formatConfirm(reminder) });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  router.delete('/reminders/:id', async (req, res) => {
+    try {
+      const uid = userId();
+      if (req.params.id === 'all') {
+        const n = await reminderService.cancelAllPending(uid);
+        return res.json({ success: true, cancelled: n });
+      }
+      const reminder = await reminderService.cancel(uid, req.params.id);
+      if (!reminder) return res.status(404).json({ error: 'Not found' });
+      res.json({ success: true, reminder });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
   // Memories
   router.get('/memories', async (req, res) => {
     try {
@@ -159,6 +233,54 @@ export function createApiRouter(deps: {
       const uid = (req.query.userId as string) || userId();
       const stats = await memoryService.stats(uid);
       res.json(stats);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Day working-memory status (for dashboard / debug)
+  router.get('/conversation/day', async (_req, res) => {
+    try {
+      const uid = userId();
+      const state = await conversationService.getState(uid);
+      const day = await conversationService.getDayContext(uid);
+      res.json({
+        userId: uid,
+        conversationDate: day.conversationDate,
+        messageCount: day.messages.length,
+        daySummary: day.daySummary || null,
+        previousDaySummary: day.previousDaySummary || null,
+        lastConsolidatedDate: state?.lastConsolidatedDate || null,
+        nightly: {
+          enabled: env.enableNightlyConsolidate,
+          hour: env.nightlyConsolidateHour,
+          minute: env.nightlyConsolidateMinute,
+          timezone: env.timezone,
+        },
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Manual "sleep" (consolidate + clear day transcript + memory hygiene)
+  router.post('/conversation/sleep', async (_req, res) => {
+    try {
+      const uid = userId();
+      const result = await conversationService.sleepAndReset(uid);
+      res.json({ success: true, ...result });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Run memory dedup/hygiene only (without clearing day chat)
+  router.post('/memories/hygiene', async (_req, res) => {
+    try {
+      const uid = userId();
+      const result = await memoryService.hygienizeMemories(uid);
+      const stats = await memoryService.stats(uid);
+      res.json({ success: true, hygiene: result, stats });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

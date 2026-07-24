@@ -8,6 +8,7 @@ import {
 import { Client } from '../../core/client';
 import { Database } from '../../db/mongo';
 import {
+  buildClockContext,
   formatDateInTz,
   formatTimeInTz,
   randomId,
@@ -150,9 +151,13 @@ Persona: ${persona ? JSON.stringify({
   }
 
   formatTodayContext(schedule: DailySchedule | null): string {
-    if (!schedule) return 'Belum ada jadwal hari ini.';
+    const clock = buildClockContext();
+    if (!schedule) {
+      return `Belum ada jadwal hari ini. (Sekarang ${clock.time} ${clock.periodLabel})`;
+    }
     const lines = [
-      `Tanggal: ${schedule.date}`,
+      `Tanggal jadwal: ${schedule.date}`,
+      `Sekarang: ${clock.time} (${clock.periodLabel}) ${clock.timezone}`,
       `Vibe: ${schedule.summary || '-'}`,
       'Aktivitas:',
     ];
@@ -167,6 +172,7 @@ Persona: ${persona ? JSON.stringify({
     const next = schedule.activities.find((a) => a.status === 'planned');
     if (ongoing) lines.push(`Sedang berlangsung: ${ongoing.title}`);
     if (next) lines.push(`Berikutnya: ${next.title} @ ${formatTimeInTz(new Date(next.startAt))}`);
+    else lines.push('Tidak ada aktivitas planned berikutnya (relatif sekarang).');
     return lines.join('\n');
   }
 

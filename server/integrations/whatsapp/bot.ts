@@ -21,7 +21,9 @@ import { ScheduleService } from '../../domain/schedule/service';
 import { ConversationService } from '../../domain/conversation/service';
 import { ProactiveService } from '../../domain/proactive/service';
 import { MoodService } from '../../domain/mood/service';
+import { ReminderService } from '../../domain/reminder/service';
 import { env } from '../../config/env';
+import { buildClockContext } from '../../utils/time';
 
 export type WaConnectionStatus =
   | 'idle'
@@ -74,7 +76,8 @@ export class WhatsAppBot {
     private scheduleService: ScheduleService,
     private conversationService: ConversationService,
     private proactiveService: ProactiveService,
-    private moodService: MoodService
+    private moodService: MoodService,
+    private reminderService?: ReminderService
   ) {}
 
   async start(): Promise<void> {
@@ -833,33 +836,83 @@ export class WhatsAppBot {
       mood.current.label
     );
 
-    console.log('🧠 Extracting memories...');
-    const storedMemories = await this.memoryService.extractAndStore(userId, text);
-    if (storedMemories.length) {
-      console.log(`✓ Stored ${storedMemories.length} memories`);
+    // Skip realtime memory extract for pure reminder intents (avoid polluting long-term memory)
+    const isReminderIntent =
+      /\b(ingatkan|ingetin|remind|pengingat|alarm)\b/i.test(text) &&
+      !/\b(ingat(kan)? (bahwa|kalau|klo|selalu|saya suka|aku suka))\b/i.test(text);
+
+    if (!isReminderIntent) {
+      console.log('🧠 Realtime memory scan (high-importance only)...');
+      const storedMemories = await this.memoryService.extractAndStore(userId, text, {
+        minImportance: env.realtimeMemoryImportanceThreshold,
+        source: 'realtime',
+      });
+      if (storedMemories.length) {
+        console.log(`✓ Stored ${storedMemories.length} urgent memories`);
+      }
+    } else {
+      console.log('⏰ Reminder intent detected — skip realtime memory extract');
     }
 
-    console.log('🔍 Retrieving memories...');
+    console.log('🔍 Retrieving long-term memories...');
     const relevant = await this.memoryService.search(userId, text);
     const memoryContext = this.memoryService.formatContext(relevant);
     const scheduleContext = this.scheduleService.formatTodayContext(schedule);
     const moodContext = this.moodService.formatContext(mood);
+    const activeReminders = this.reminderService
+      ? await this.reminderService.list(userId, { status: 'active', limit: 5 })
+      : [];
+    const reminderContext = this.reminderService
+      ? this.reminderService.formatActiveContext(activeReminders)
+      : '';
     console.log(`💫 Mood: ${mood.current.emoji} ${mood.current.label} (${mood.current.color})`);
+    if (activeReminders.length) {
+      console.log(`⏰ Active reminders: ${activeReminders.length}`);
+    }
 
-    const history = await this.conversationService.getHistory(userId);
+    // Day-scoped working memory (fullish same-day transcript)
+    const day = await this.conversationService.getDayContext(userId);
+    const clock = buildClockContext();
+    console.log(
+      `🕒 Now ${clock.longDate} ${clock.time} (${clock.periodLabel}) tz=${clock.timezone}`
+    );
+
     const systemPrompt = this.personaService.buildSystemPrompt({
       persona,
       memoryContext,
       scheduleContext,
       moodContext,
-      summary: undefined,
+      reminderContext,
+      summary: day.previousDaySummary || day.daySummary,
+      timeContext: clock.promptBlock,
     });
 
     const turnHistory: Message[] = [{ role: 'system', content: systemPrompt }];
 
-    // Few-shot style lock (in-context examples) before real conversation history.
-    // Only seed when history is still short so we don't bloat every long session.
-    const nonSystemHistory = history.filter((m) => m.role !== 'system');
+    // Hard pin time near the user turn so model cannot "forget" it behind long history
+    turnHistory.push({
+      role: 'system',
+      content:
+        `PIN WAKTU LIVE: sekarang jam ${clock.time}, periode ${clock.periodLabel.toUpperCase()}, ${clock.longDate} (${clock.timezone}). ` +
+        `Sapaan cocok: "${clock.greeting}". ${clock.behaviorHint} ` +
+        `JANGAN pakai: ${clock.antiPatterns.map((x) => `"${x}"`).join(', ') || '-'}.`,
+    });
+
+    if (day.previousDaySummary) {
+      turnHistory.push({
+        role: 'system',
+        content: `Ringkasan kemarin (setelah "tidur", detail remeh sudah dibersihkan):\n${day.previousDaySummary}`,
+      });
+    }
+    if (day.daySummary) {
+      turnHistory.push({
+        role: 'system',
+        content: `Ringkasan percakapan lebih awal hari ini:\n${day.daySummary}`,
+      });
+    }
+
+    // Few-shot style lock only when day is still young
+    const nonSystemHistory = day.messages.filter((m) => m.role === 'user' || m.role === 'assistant');
     if (nonSystemHistory.length < 8) {
       for (const shot of this.personaService.getStyleFewShotMessages()) {
         turnHistory.push({ role: shot.role, content: shot.content });
@@ -869,7 +922,11 @@ export class WhatsAppBot {
     for (const m of nonSystemHistory) {
       turnHistory.push(m as Message);
     }
-    turnHistory.push({ role: 'user', content: text });
+    // Stamp current local time on the user turn itself (model attends strongly to latest user msg)
+    turnHistory.push({
+      role: 'user',
+      content: `[waktu lokal: ${clock.time} | ${clock.periodLabel} | ${clock.date} ${clock.timezone}]\n${text}`,
+    });
 
     this.tools.setContext({
       userId,
@@ -877,9 +934,12 @@ export class WhatsAppBot {
       scheduleService: this.scheduleService,
       personaService: this.personaService,
       moodService: this.moodService,
+      reminderService: this.reminderService,
     });
 
-    console.log('🤖 Agent turn...');
+    console.log(
+      `🤖 Agent turn (day=${day.conversationDate}, history=${nonSystemHistory.length} bubbles)...`
+    );
     let responseText = '';
     const final = await runAgentTurn(
       this.client,
@@ -894,11 +954,13 @@ export class WhatsAppBot {
     const reply = (final || responseText || 'Hmm, aku blank sebentar.\n\nUlangi ya.').trim();
     await this.sendTextBubbles(from, reply);
 
-    const toSave = turnHistory.filter((m) => m.role !== 'tool');
-    if (!toSave.some((m) => m.role === 'assistant' && m.content === reply)) {
-      toSave.push({ role: 'assistant', content: reply });
-    }
-    await this.conversationService.saveHistory(userId, toSave);
+    // Persist only durable day chat (user/assistant). System/few-shot rebuilt each turn.
+    const toSave: Message[] = [
+      ...nonSystemHistory,
+      { role: 'user', content: text },
+      { role: 'assistant', content: reply },
+    ];
+    await this.conversationService.saveHistory(userId, toSave, day.daySummary);
     await this.proactiveService.enqueueIdleNudge(userId);
     console.log(`✓ Response sent (${this.splitIntoBubbles(reply).length} bubbles)\n`);
   }

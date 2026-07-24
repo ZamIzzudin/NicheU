@@ -4,6 +4,8 @@ import { PersonaService } from '../domain/persona/service';
 import { ProactiveService } from '../domain/proactive/service';
 import { ScheduleService } from '../domain/schedule/service';
 import { MoodService } from '../domain/mood/service';
+import { ConversationService } from '../domain/conversation/service';
+import { ReminderService } from '../domain/reminder/service';
 import { formatDateInTz } from '../utils/time';
 
 export class JobScheduler {
@@ -16,6 +18,8 @@ export class JobScheduler {
     private scheduleService: ScheduleService,
     private proactiveService: ProactiveService,
     private moodService: MoodService,
+    private conversationService: ConversationService,
+    private reminderService: ReminderService,
     private sendMessage: (userId: string, text: string) => Promise<void>,
     private getActiveUserId: () => string | null
   ) {}
@@ -44,6 +48,9 @@ export class JobScheduler {
       const onboarded = await this.personaService.isOnboarded(userId);
       if (!onboarded) return;
 
+      // Sleep first so day context/mood/schedule see a clean day if needed
+      await this.maybeNightlySleep(userId);
+
       const persona = await this.personaService.get(userId);
       const mood = await this.moodService.ensureToday(userId, persona);
       await this.scheduleService.ensureToday(userId, persona, mood.current.label);
@@ -52,10 +59,77 @@ export class JobScheduler {
       await this.maybePreGenerateTomorrow(userId, persona);
 
       if (typeof this.sendMessage === 'function') {
+        // One-shot user reminders (ephemeral collection)
+        const n = await this.reminderService.processDue(userId, this.sendMessage);
+        if (n > 0) console.log(`⏰ Fired ${n} reminder(s)`);
+
         await this.proactiveService.processDue(userId, persona, this.sendMessage);
+      }
+
+      // Occasional cleanup of old terminal reminders (keep collection lean)
+      if (Math.random() < 0.02) {
+        const purged = await this.reminderService.purgeOld(userId, 14);
+        if (purged > 0) console.log(`🧹 Purged ${purged} old reminders`);
       }
     } finally {
       this.running = false;
+    }
+  }
+
+  /**
+   * "Tidur": after local NIGHTLY_CONSOLIDATE_HOUR:MINUTE,
+   * consolidate previous day's chat into long-term memories and clear day transcript.
+   */
+  private async maybeNightlySleep(userId: string) {
+    if (!env.enableNightlyConsolidate) return;
+
+    const now = new Date();
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: env.timezone,
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).formatToParts(now);
+    const hour = Number(parts.find((p) => p.type === 'hour')?.value || 0);
+    const minute = Number(parts.find((p) => p.type === 'minute')?.value || 0);
+    const nowM = hour * 60 + minute;
+    const targetM = env.nightlyConsolidateHour * 60 + env.nightlyConsolidateMinute;
+    if (nowM < targetM) return;
+
+    const today = formatDateInTz(now, env.timezone);
+    const yesterday = formatDateInTz(new Date(now.getTime() - 24 * 60 * 60 * 1000), env.timezone);
+    const state = await this.conversationService.getState(userId);
+    if (!state) return;
+
+    const day = state.conversationDate || today;
+
+    // Already finished yesterday's sleep and holding a clean today
+    if (state.lastConsolidatedDate === yesterday && day === today) {
+      return;
+    }
+    if (state.lastConsolidatedDate === today) {
+      return;
+    }
+
+    // Primary: still holding transcript for yesterday (or older)
+    if (day < today) {
+      console.log(`😴 Nightly sleep trigger for ${userId} day=${day}`);
+      await this.conversationService.sleepAndReset(userId, day);
+      return;
+    }
+
+    // At/after consolidate time on a day that already rolled conversationDate to today
+    // but has not yet marked yesterday consolidated (edge: first message of new day
+    // may rewrite date before sleep ran). If lastConsolidated is older than yesterday,
+    // consolidate yesterday from leftover messages if any.
+    if (
+      day === today &&
+      state.lastConsolidatedDate &&
+      state.lastConsolidatedDate < yesterday &&
+      (state.messages?.length || 0) > 0
+    ) {
+      console.log(`😴 Nightly sleep (carry leftover) for ${userId}`);
+      await this.conversationService.sleepAndReset(userId, yesterday);
     }
   }
 

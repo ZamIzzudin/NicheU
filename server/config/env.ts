@@ -48,7 +48,26 @@ export const env = {
   timezone: process.env.TIMEZONE || 'Asia/Jakarta',
   memoryImportanceThreshold: num('MEMORY_IMPORTANCE_THRESHOLD', 0.7),
   memoryRetrievalLimit: num('MEMORY_RETRIEVAL_LIMIT', 5),
-  historyMaxMessages: num('HISTORY_MAX_MESSAGES', 24),
+  /** Soft hard-cap for SAME-DAY transcript (default high so full-day context stays). */
+  historyMaxMessages: num('HISTORY_MAX_MESSAGES', 200),
+  dayHistoryMaxMessages: num('DAY_HISTORY_MAX_MESSAGES', 200),
+  /** Realtime extract only stores high-importance facts; rest waits for nightly sleep. */
+  realtimeMemoryImportanceThreshold: num(
+    'REALTIME_MEMORY_IMPORTANCE_THRESHOLD',
+    Math.max(0.85, num('MEMORY_IMPORTANCE_THRESHOLD', 0.7))
+  ),
+  enableNightlyConsolidate: bool('ENABLE_NIGHTLY_CONSOLIDATE', true),
+  /** Local hour/minute in TIMEZONE when "sleep" consolidation runs. */
+  nightlyConsolidateHour: num('NIGHTLY_CONSOLIDATE_HOUR', 0),
+  nightlyConsolidateMinute: num('NIGHTLY_CONSOLIDATE_MINUTE', 5),
+  /** During sleep: scan long-term memories and merge/drop near-duplicates. */
+  enableNightlyMemoryHygiene: bool('ENABLE_NIGHTLY_MEMORY_HYGIENE', true),
+  /** Cosine similarity to treat two memory embeddings as duplicates (0-1). */
+  memoryDedupCosineThreshold: num('MEMORY_DEDUP_COSINE_THRESHOLD', 0.9),
+  /** Max memories scanned per nightly hygiene pass. */
+  memoryDedupMaxScan: num('MEMORY_DEDUP_MAX_SCAN', 250),
+  /** Soft threshold for token-overlap / normalized-text near match. */
+  memoryDedupTokenOverlap: num('MEMORY_DEDUP_TOKEN_OVERLAP', 0.72),
   proactiveMinIntervalSec: num('PROACTIVE_MIN_INTERVAL_SEC', 300),
   proactiveMaxPerDay: num('PROACTIVE_MAX_PER_DAY', 12),
   proactiveMaxOverdueMin: num('PROACTIVE_MAX_OVERDUE_MIN', 8),
