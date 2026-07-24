@@ -1,5 +1,10 @@
-# Single container + external Mongo
-# Public port: 3000 only
+# Single app container + external Mongo (Atlas / shared VPS Mongo)
+# Use this when MONGODB_URI points outside compose network.
+#
+# Required env (Dokploy env UI or .env):
+#   MONGODB_URI=.../niche-daily...
+#   AUTHORIZED_PHONE=628...
+#   API_KEY=...
 
 services:
   niche-daily:
@@ -13,6 +18,7 @@ services:
     env_file:
       - .env
     environment:
+      # Force docker port layout; keep external MONGODB_URI from env_file / Dokploy
       API_PORT: 4000
       PORT: 4000
       WEB_PORT: 3000

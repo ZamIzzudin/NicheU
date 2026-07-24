@@ -24,13 +24,19 @@ function bool(name: string, fallback: boolean): boolean {
   return ['1', 'true', 'yes', 'on'].includes(raw.toLowerCase());
 }
 
+/** Digits-only phone id used as persona/memory/schedule userId everywhere. */
+export function normalizeUserId(phone: string): string {
+  return String(phone || '').replace(/\D/g, '');
+}
+
 export const env = {
   mongodbUri: required('MONGODB_URI', 'mongodb://localhost:27017/niche-daily'),
   apiBaseUrl: required('API_BASE_URL', 'https://api.openai.com/v1').replace(/\/$/, ''),
   apiKey: required('API_KEY', ''),
   apiModel: required('API_MODEL', 'gpt-4o-mini'),
   embeddingModel: required('EMBEDDING_MODEL', 'text-embedding-3-small'),
-  authorizedPhone: required('AUTHORIZED_PHONE', ''),
+  // Always store/lookup as digits only so API + WA bot share the same key
+  authorizedPhone: normalizeUserId(required('AUTHORIZED_PHONE', '')),
   port: num('PORT', 3000),
   webPort: num('WEB_PORT', 3001),
   apiToken: process.env.API_TOKEN || 'niche-daily-local',

@@ -32,7 +32,8 @@ export function createApiRouter(deps: {
     client,
   } = deps;
 
-  const userId = () => env.authorizedPhone.replace(/\D/g, '');
+  // Must match WhatsApp bot storage key (digits-only AUTHORIZED_PHONE)
+  const userId = () => env.authorizedPhone;
 
   function requireToken(req: Request, res: Response, next: NextFunction) {
     if (req.method === 'GET') return next();
@@ -47,8 +48,30 @@ export function createApiRouter(deps: {
 
   router.get('/health', async (_req, res) => {
     const mongoOk = await db.ping();
+    const uid = userId();
+    let personaCount = 0;
+    let personaForUser = false;
+    try {
+      personaCount = await db.personas.countDocuments({});
+      personaForUser = Boolean(await db.personas.findOne({ userId: uid }, { projection: { _id: 1 } }));
+    } catch {
+      // ignore
+    }
+    // Redact credentials; show host + db name only for debugging empty persona
+    let mongoHost = '';
+    let mongoDb = '';
+    try {
+      const u = new URL(env.mongodbUri.replace(/^mongodb(\+srv)?:\/\//, 'http://'));
+      mongoHost = u.host;
+      mongoDb = (u.pathname || '').replace(/^\//, '').split('?')[0] || '';
+    } catch {
+      mongoHost = 'unparsed';
+    }
     res.json({
       status: mongoOk && whatsappBot ? 'ok' : 'degraded',
+      userId: uid,
+      mongo: { ok: mongoOk, host: mongoHost, db: mongoDb },
+      persona: { count: personaCount, forUser: personaForUser },
       timestamp: new Date().toISOString(),
       gateway: {
         baseUrl: env.apiBaseUrl,
@@ -143,8 +166,14 @@ export function createApiRouter(deps: {
 
   // Persona
   router.get('/persona', async (_req, res) => {
-    const persona = await personaService.get(userId());
-    res.json({ persona });
+    const uid = userId();
+    const persona = await personaService.get(uid);
+    // debug helpers: if empty, check these vs local Mongo documents
+    res.json({
+      persona,
+      userId: uid,
+      found: Boolean(persona),
+    });
   });
 
   router.put('/persona', async (req, res) => {

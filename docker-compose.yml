@@ -3,13 +3,16 @@
 # Public app port INSIDE container: 3000 (Next.js UI)
 # Internal API: 4000 (not published; Next rewrites /api/*)
 #
-# For Dokploy domains: set Domain Port = 3000 on service "niche-daily"
-# Prefer NOT binding host ports (Traefik uses docker network). Optional host map via HOST_WEB_PORT.
+# MONGODB_URI:
+#   - default (internal): mongodb://mongo:27017/niche-daily
+#   - shared/Atlas: set MONGODB_URI in Dokploy env (same as local) — this OVERRIDES default
+#   - if using external Mongo, you can disable the `mongo` service via COMPOSE profile
 
 services:
   mongo:
     image: mongo:7
     restart: unless-stopped
+    profiles: ["internal-mongo"]
     volumes:
       - niche_mongo_data:/data/db
     healthcheck:
@@ -24,17 +27,13 @@ services:
       dockerfile: Dockerfile
     image: niche-daily:latest
     restart: unless-stopped
-    depends_on:
-      mongo:
-        condition: service_healthy
-    # Dokploy/Traefik reaches container port 3000 over docker network
     expose:
       - "3000"
-    # Optional host publish (can cause conflicts; leave empty/unset on Dokploy if possible)
     ports:
       - "${HOST_WEB_PORT:-3000}:3000"
     environment:
-      MONGODB_URI: mongodb://mongo:27017/niche-daily
+      # IMPORTANT: do not hardcode — must respect Dokploy/local env (shared Atlas/local Mongo)
+      MONGODB_URI: ${MONGODB_URI:-mongodb://mongo:27017/niche-daily}
       API_BASE_URL: ${API_BASE_URL:-https://api.openai.com/v1}
       API_KEY: ${API_KEY}
       API_MODEL: ${API_MODEL:-gpt-4o-mini}

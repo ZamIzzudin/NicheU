@@ -33,7 +33,8 @@ export type WaConnectionStatus =
 export class WhatsAppBot {
   private socket: WASocket | null = null;
   private logger = pino({ level: 'silent' });
-  private authorizedPhone = env.authorizedPhone.replace(/^\+/, '');
+  // Digits-only — must match API persona/memory userId
+  private authorizedPhone = env.authorizedPhone.replace(/\D/g, '');
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 8;
   private currentQRCode: string | null = null;
