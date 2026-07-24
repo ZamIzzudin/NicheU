@@ -11,6 +11,7 @@ import { ConversationService } from './domain/conversation/service';
 import { ProactiveService } from './domain/proactive/service';
 import { MoodService } from './domain/mood/service';
 import { ReminderService } from './domain/reminder/service';
+import { BotService } from './domain/bots/service';
 import { WhatsAppBot } from './integrations/whatsapp/bot';
 import { JobScheduler } from './jobs/scheduler';
 import { createApiRouter } from './routes/api';
@@ -42,13 +43,16 @@ async function main() {
   const conversationService = new ConversationService(db, client, memoryService);
   const moodService = new MoodService(db, client);
   const reminderService = new ReminderService(db, client);
+  const botService = new BotService(db);
+  await botService.ensureDemoBots();
   const proactiveService = new ProactiveService(db, client, scheduleService, moodService);
   await proactiveService.init();
   console.log('✓ Proactive service ready\n');
   console.log(
     `🧠 Day memory: max ${env.dayHistoryMaxMessages || env.historyMaxMessages} turns/day; nightly sleep ${String(env.nightlyConsolidateHour).padStart(2, '0')}:${String(env.nightlyConsolidateMinute).padStart(2, '0')} ${env.timezone}`
   );
-  console.log('⏰ Reminder collection ready (ephemeral, not long-term memory)\n');
+  console.log('⏰ Reminder collection ready (ephemeral, not long-term memory)');
+  console.log('🤖 Automation bots ready (manual, background + WA notify)\n');
 
   tools.setContext({
     memoryService,
@@ -56,6 +60,7 @@ async function main() {
     personaService,
     moodService,
     reminderService,
+    botService,
   });
 
   console.log('📱 Starting WhatsApp bot...');
@@ -73,6 +78,19 @@ async function main() {
   await whatsappBot.start();
   console.log('✓ WhatsApp bot started\n');
 
+  const sendOutbound = async (userId: string, text: string) => {
+    if (!whatsappBot.isConnected()) return;
+    await whatsappBot.sendToUser(userId, text);
+    console.log(`📤 Outbound -> ${userId}: ${text.slice(0, 80)}...`);
+  };
+
+  botService.setNotify(async (userId, text) => {
+    await sendOutbound(userId, text);
+  });
+
+  // Resume any queued bot runs after restart
+  botService.processQueue().catch((err) => console.warn('Bot queue resume:', err));
+
   const scheduler = new JobScheduler(
     db,
     personaService,
@@ -81,11 +99,8 @@ async function main() {
     moodService,
     conversationService,
     reminderService,
-    async (userId, text) => {
-      if (!whatsappBot.isConnected()) return;
-      await whatsappBot.sendToUser(userId, text);
-      console.log(`📤 Outbound -> ${userId}: ${text.slice(0, 80)}...`);
-    },
+    botService,
+    sendOutbound,
     () => env.authorizedPhone.replace(/\D/g, '')
   );
   scheduler.start();
@@ -105,6 +120,7 @@ async function main() {
       moodService,
       conversationService,
       reminderService,
+      botService,
       whatsappBot,
       client,
     })

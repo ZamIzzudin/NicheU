@@ -8,6 +8,7 @@ import { ScheduleService } from '../domain/schedule/service';
 import { MoodService } from '../domain/mood/service';
 import { ConversationService } from '../domain/conversation/service';
 import { ReminderService } from '../domain/reminder/service';
+import { BotService } from '../domain/bots/service';
 import { WhatsAppBot } from '../integrations/whatsapp/bot';
 import { Client } from '../core/client';
 import { MoodLabel } from '../../shared/types';
@@ -22,6 +23,7 @@ export function createApiRouter(deps: {
   moodService: MoodService;
   conversationService: ConversationService;
   reminderService: ReminderService;
+  botService: BotService;
   whatsappBot: WhatsAppBot;
   client: Client;
 }): Router {
@@ -35,6 +37,7 @@ export function createApiRouter(deps: {
     moodService,
     conversationService,
     reminderService,
+    botService,
     whatsappBot,
     client,
   } = deps;
@@ -154,6 +157,80 @@ export function createApiRouter(deps: {
       res.json({ success: true });
     } catch (error: any) {
       res.status(400).json({ error: error.message });
+    }
+  });
+
+  // Automation bots (manual, background, WA notify)
+  router.get('/bots', async (_req, res) => {
+    try {
+      const includeDisabled = String(_req.query.include_disabled || '') === '1';
+      const bots = await botService.list({ enabledOnly: !includeDisabled });
+      res.json({ bots, catalog: botService.formatCatalog(bots) });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  router.post('/bots', async (req, res) => {
+    try {
+      const bot = await botService.upsert(req.body || {});
+      res.status(201).json({ bot });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  router.put('/bots/:name', async (req, res) => {
+    try {
+      const existing = await botService.getByName(req.params.name);
+      if (!existing) return res.status(404).json({ error: 'Bot not found' });
+      const bot = await botService.upsert({
+        ...existing,
+        ...req.body,
+        name: req.params.name,
+        handler: req.body.handler || existing.handler,
+        title: req.body.title || existing.title,
+        description: req.body.description || existing.description,
+      });
+      res.json({ bot });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  router.post('/bots/:name/run', async (req, res) => {
+    try {
+      const uid = userId();
+      const result = await botService.enqueueRun({
+        userId: uid,
+        botName: req.params.name,
+        parameters: req.body?.parameters || req.body || {},
+        triggerText: req.body?.triggerText,
+      });
+      res.json(result);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  router.get('/bots/runs', async (req, res) => {
+    try {
+      const uid = (req.query.userId as string) || userId();
+      const status = (req.query.status as string) || 'all';
+      const runs = await botService.listRuns(uid, { status: status as any });
+      res.json({ runs });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  router.get('/bots/runs/:id', async (req, res) => {
+    try {
+      const run = await botService.getRun(req.params.id);
+      if (!run) return res.status(404).json({ error: 'Run not found' });
+      res.json({ run });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
     }
   });
 

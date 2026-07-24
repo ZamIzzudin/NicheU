@@ -13,7 +13,9 @@
     "start:server": "node dist/server/index.js",
     "start:web": "cd web && npm run start -- -p 3001",
     "start": "npm run start:server",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "postinstall": "npx playwright install firefox || true",
+    "playwright:install": "npx playwright install firefox"
   },
   "keywords": [
     "ai",
@@ -33,6 +35,7 @@
     "express": "^4.21.2",
     "mongodb": "^6.12.0",
     "pino": "^9.6.0",
+    "playwright": "^1.49.1",
     "qrcode-terminal": "^0.12.0"
   },
   "devDependencies": {

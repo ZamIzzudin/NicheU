@@ -6,6 +6,7 @@ import { ScheduleService } from '../domain/schedule/service';
 import { MoodService } from '../domain/mood/service';
 import { ConversationService } from '../domain/conversation/service';
 import { ReminderService } from '../domain/reminder/service';
+import { BotService } from '../domain/bots/service';
 import { formatDateInTz } from '../utils/time';
 
 export class JobScheduler {
@@ -20,6 +21,7 @@ export class JobScheduler {
     private moodService: MoodService,
     private conversationService: ConversationService,
     private reminderService: ReminderService,
+    private botService: BotService,
     private sendMessage: (userId: string, text: string) => Promise<void>,
     private getActiveUserId: () => string | null
   ) {}
@@ -65,6 +67,9 @@ export class JobScheduler {
 
         await this.proactiveService.processDue(userId, persona, this.sendMessage);
       }
+
+      // Background automation bots (queued/running + WA notify when done)
+      await this.botService.processQueue();
 
       // Occasional cleanup of old terminal reminders (keep collection lean)
       if (Math.random() < 0.02) {

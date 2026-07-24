@@ -865,6 +865,19 @@ export class WhatsAppBot {
     const reminderContext = this.reminderService
       ? this.reminderService.formatActiveContext(activeReminders)
       : '';
+
+    // Bot catalog so agent can match natural intents ("cariin ...") without formal commands
+    let botCatalog = '';
+    try {
+      const botService = this.tools.getContext()?.botService;
+      if (botService) {
+        const bots = await botService.list({ enabledOnly: true });
+        botCatalog = botService.formatCatalog(bots);
+      }
+    } catch {
+      // ignore catalog load errors
+    }
+
     console.log(`💫 Mood: ${mood.current.emoji} ${mood.current.label} (${mood.current.color})`);
     if (activeReminders.length) {
       console.log(`⏰ Active reminders: ${activeReminders.length}`);
@@ -883,6 +896,7 @@ export class WhatsAppBot {
       scheduleContext,
       moodContext,
       reminderContext,
+      botCatalog,
       summary: day.previousDaySummary || day.daySummary,
       timeContext: clock.promptBlock,
     });
@@ -928,6 +942,7 @@ export class WhatsAppBot {
       content: `[waktu lokal: ${clock.time} | ${clock.periodLabel} | ${clock.date} ${clock.timezone}]\n${text}`,
     });
 
+    // botService is injected globally via tools.setContext at boot; keep userId here
     this.tools.setContext({
       userId,
       memoryService: this.memoryService,

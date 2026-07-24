@@ -2,7 +2,6 @@ import { Tool, ToolExecution, ToolParameter } from '../../../shared/types';
 import { ToolDefinition, ToolResult } from '../../core/types';
 import { Database } from '../../db/mongo';
 import { runToolCode, assertSafeCode } from './sandbox';
-import { duckDuckGoSearch } from '../../integrations/search/duckduckgo';
 import { formatDateInTz, formatTimeInTz, randomId } from '../../utils/time';
 
 type ExecContext = {
@@ -44,6 +43,19 @@ type ExecContext = {
     formatActiveContext: (reminders: any[]) => string;
     parseWhen: (when: string, sourceText?: string) => Promise<Date>;
   };
+  botService?: {
+    list: (options?: { enabledOnly?: boolean }) => Promise<any[]>;
+    formatCatalog: (bots: any[]) => string;
+    enqueueRun: (input: {
+      userId: string;
+      botName: string;
+      parameters?: Record<string, unknown>;
+      triggerText?: string;
+    }) => Promise<any>;
+    listRuns: (userId: string, options?: any) => Promise<any[]>;
+    getRun: (runId: string) => Promise<any>;
+    getByName: (name: string) => Promise<any>;
+  };
 };
 
 export class ToolRegistry {
@@ -55,6 +67,10 @@ export class ToolRegistry {
 
   setContext(ctx: ExecContext) {
     this.context = { ...this.context, ...ctx };
+  }
+
+  getContext(): ExecContext {
+    return this.context;
   }
 
   async init(): Promise<void> {
@@ -273,11 +289,42 @@ export class ToolRegistry {
           summary: `Sekarang ${clock.longDate}, jam ${clock.time} (${clock.periodLabel}) di ${clock.timezone}.`,
         };
       },
-      web_search: async (args) => {
-        const query = String(args.query || '');
-        const limit = Number(args.limit || 5);
-        const results = await duckDuckGoSearch(query, limit);
-        return { success: true, query, count: results.length, results };
+      web_search: async (args, ctx) => {
+        // Legacy sync tool is broken/unreliable (DuckDuckGo). Route to background bot.
+        const query = String(args.query || args.q || '').trim();
+        if (!query) return { success: false, error: 'query required' };
+        if (!ctx?.userId || !ctx?.botService) {
+          return {
+            success: false,
+            error:
+              'web_search sinkron sudah dinonaktifkan. Gunakan run_bot bot_name=google_search (butuh botService).',
+          };
+        }
+        const result = await ctx.botService.enqueueRun({
+          userId: ctx.userId,
+          botName: 'google_search',
+          parameters: {
+            query,
+            limit: Number(args.limit || 5),
+          },
+          triggerText: query,
+        });
+        if (result.status === 'need_params') {
+          return { success: false, need_params: true, ...result };
+        }
+        if (result.status === 'error') {
+          return { success: false, error: result.error };
+        }
+        return {
+          success: true,
+          queued: true,
+          migrated: true,
+          run: result.run,
+          instruction:
+            'Search dijalankan di BACKGROUND lewat bot google_search (Playwright Firefox). ' +
+            'Kasih tau user "nanti aku infoin hasilnya ya". Jangan ngarang hasil sekarang.',
+          ackHint: result.ackHint,
+        };
       },
       get_my_schedule: async (_args, ctx) => {
         const userId = ctx?.userId;
@@ -381,6 +428,116 @@ export class ToolRegistry {
         if (!rem) return { success: false, error: 'Reminder not found' };
         return { success: true, reminder: { id: rem.id, status: rem.status, text: rem.text } };
       },
+      list_bots: async (args, ctx) => {
+        if (!ctx?.botService) return { success: false, error: 'No bot service' };
+        const bots = await ctx.botService.list({ enabledOnly: args.include_disabled !== true });
+        return {
+          success: true,
+          count: bots.length,
+          catalog: ctx.botService.formatCatalog(bots),
+          bots: bots.map((b: any) => ({
+            name: b.name,
+            title: b.title,
+            description: b.description,
+            triggers: b.triggers || [],
+            parameters: b.parameters || [],
+            enabled: b.enabled,
+          })),
+          note: 'Bots are HEAVY background automations (not sync tools). Use run_bot; user will get WA notify when done.',
+        };
+      },
+      run_bot: async (args, ctx) => {
+        const userId = ctx?.userId;
+        if (!userId || !ctx?.botService) {
+          return { success: false, error: 'No bot service / user' };
+        }
+        const botName = String(args.bot_name || args.name || '').trim();
+        if (!botName) return { success: false, error: 'bot_name required' };
+
+        let parameters: Record<string, unknown> = {};
+        if (args.parameters && typeof args.parameters === 'object' && !Array.isArray(args.parameters)) {
+          parameters = args.parameters as Record<string, unknown>;
+        } else if (typeof args.parameters_json === 'string' && args.parameters_json.trim()) {
+          try {
+            parameters = JSON.parse(args.parameters_json);
+          } catch {
+            return { success: false, error: 'parameters_json must be valid JSON object' };
+          }
+        }
+
+        // Also accept flat extra keys (except reserved)
+        const reserved = new Set([
+          'bot_name',
+          'name',
+          'parameters',
+          'parameters_json',
+          'trigger_text',
+          'source_text',
+        ]);
+        for (const [k, v] of Object.entries(args)) {
+          if (!reserved.has(k) && parameters[k] === undefined) parameters[k] = v;
+        }
+
+        const result = await ctx.botService.enqueueRun({
+          userId,
+          botName,
+          parameters,
+          triggerText: args.trigger_text
+            ? String(args.trigger_text)
+            : args.source_text
+              ? String(args.source_text)
+              : undefined,
+        });
+
+        if (result.status === 'need_params') {
+          return {
+            success: false,
+            need_params: true,
+            missing: result.missing,
+            errors: result.errors,
+            bot: result.bot,
+            instruction:
+              'ASK the user for the missing parameters in persona style, then call run_bot again with complete params. Do NOT pretend the bot finished.',
+            askHint: result.askHint,
+          };
+        }
+        if (result.status === 'error') {
+          return { success: false, error: result.error };
+        }
+
+        return {
+          success: true,
+          queued: true,
+          run: result.run,
+          instruction:
+            'Tell user the bot is running in background in persona style (e.g. "nanti aku infoin lagi ya"). Do NOT invent the result now — WhatsApp notify comes later.',
+          ackHint: result.ackHint,
+        };
+      },
+      list_bot_runs: async (args, ctx) => {
+        const userId = ctx?.userId;
+        if (!userId || !ctx?.botService) {
+          return { success: false, error: 'No bot service / user' };
+        }
+        const status = (args.status as string) || 'active';
+        const runs = await ctx.botService.listRuns(userId, {
+          status: status as any,
+          limit: Number(args.limit || 20),
+        });
+        return {
+          success: true,
+          count: runs.length,
+          runs: runs.map((r: any) => ({
+            id: r.id,
+            botName: r.botName,
+            status: r.status,
+            parameters: r.parameters,
+            createdAt: r.createdAt,
+            finishedAt: r.finishedAt,
+            error: r.error,
+          })),
+        };
+      },
       remember_fact: async (args, ctx) => {
         const userId = ctx?.userId;
         if (!userId || !ctx?.memoryService) return { success: false, error: 'No memory context' };
@@ -461,11 +618,18 @@ export class ToolRegistry {
       {
         id: 'builtin_web_search',
         name: 'web_search',
-        description: 'Search the web via DuckDuckGo for fresh information',
+        description:
+          'Cari info di internet (background Google via Playwright). Panggil otomatis saat user minta dicarikan sesuatu dengan bahasa natural: "cariin", "bisa bantu cari ... gak?", "tolong carikan", "tau gak ...", cek harga/berita/jadwal/fakta terbaru. query = intisari topik (bukan full basabasi). Setelah queue, bilang nanti dikabari; hasil menyusul di WA. Jangan mengarang hasil.',
         category: 'information',
         functionCode: 'async function execute({ query }) { return { query }; }',
         parameters: [
-          { name: 'query', type: 'string', description: 'Search query', required: true },
+          {
+            name: 'query',
+            type: 'string',
+            description:
+              'Intisari yang dicari. "bisa cariin harga RTX 5090 gak?" → "harga RTX 5090"',
+            required: true,
+          },
           { name: 'limit', type: 'number', description: 'Max results (default 5)', required: false },
         ],
         enabled: true,
@@ -630,6 +794,75 @@ export class ToolRegistry {
         category: 'system',
         functionCode: 'async function execute() { return {}; }',
         parameters: [],
+        enabled: true,
+        builtin: true,
+        source: 'builtin',
+      },
+      {
+        id: 'builtin_list_bots',
+        name: 'list_bots',
+        description:
+          'List manual automation BOTS (heavy background jobs, not sync tools). Use when user wants a long-running automation matching a bot description.',
+        category: 'system',
+        functionCode: 'async function execute() { return {}; }',
+        parameters: [
+          {
+            name: 'include_disabled',
+            type: 'boolean',
+            description: 'Include disabled bots',
+            required: false,
+          },
+        ],
+        enabled: true,
+        builtin: true,
+        source: 'builtin',
+      },
+      {
+        id: 'builtin_run_bot',
+        name: 'run_bot',
+        description:
+          'Start a heavy automation bot in BACKGROUND. For web info requests use bot_name=google_search even if user only says natural phrases like "cariin ...". If required parameters are missing, ask user then re-call. Immediately ack in persona ("nanti aku infoin lagi"); result arrives later via WhatsApp. NOT for lightweight tools.',
+        category: 'productivity',
+        functionCode: 'async function execute(params) { return params; }',
+        parameters: [
+          {
+            name: 'bot_name',
+            type: 'string',
+            description: 'Bot name from list_bots (snake_case). Search → google_search',
+            required: true,
+          },
+          {
+            name: 'parameters_json',
+            type: 'string',
+            description: 'JSON object of bot parameters',
+            required: false,
+          },
+          {
+            name: 'trigger_text',
+            type: 'string',
+            description: 'Original user request snippet',
+            required: false,
+          },
+        ],
+        enabled: true,
+        builtin: true,
+        source: 'builtin',
+      },
+      {
+        id: 'builtin_list_bot_runs',
+        name: 'list_bot_runs',
+        description: 'List recent automation bot runs (queued/running/done)',
+        category: 'system',
+        functionCode: 'async function execute() { return {}; }',
+        parameters: [
+          {
+            name: 'status',
+            type: 'string',
+            description: 'active|queued|running|succeeded|failed|all',
+            required: false,
+          },
+          { name: 'limit', type: 'number', description: 'Max items', required: false },
+        ],
         enabled: true,
         builtin: true,
         source: 'builtin',

@@ -102,6 +102,81 @@ export interface ToolExecution {
   timestamp: Date;
 }
 
+/**
+ * Heavy automation "bots" — manually authored, not auto-generated tools.
+ * Triggered by chat, run in background, notify WhatsApp when finished.
+ */
+export type BotParameterType = 'string' | 'number' | 'boolean' | 'object' | 'array';
+
+export interface BotParameter {
+  name: string;
+  type: BotParameterType;
+  description: string;
+  required: boolean;
+  default?: unknown;
+  /** Optional examples shown when agent asks for missing params. */
+  examples?: string[];
+}
+
+export type BotRunStatus =
+  | 'queued'
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled';
+
+export interface AutomationBot {
+  _id?: string;
+  /** Stable id, e.g. bot_research_report */
+  id: string;
+  /** Unique snake_case name for tools, e.g. research_report */
+  name: string;
+  /** Human title */
+  title: string;
+  /** Rich description for matching user intent */
+  description: string;
+  /** Optional trigger phrases / keywords to help matching */
+  triggers?: string[];
+  parameters: BotParameter[];
+  /**
+   * Named handler registered in code (preferred for heavy work).
+   * Example: "http_fetch", "shell_job" (only if you implement handler).
+   */
+  handler: string;
+  /** Optional static config passed to handler (URLs, defaults, etc.) */
+  config?: Record<string, unknown>;
+  /** Optional sandbox code (async function execute(params, ctx)) — only if no named handler needs it */
+  functionCode?: string;
+  enabled: boolean;
+  /** Max runtime before fail (ms). Default 10 minutes. */
+  timeoutMs?: number;
+  /** Message template pieces (agent may rephrase in persona) */
+  ackMessageHint?: string;
+  successMessageHint?: string;
+  failureMessageHint?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface BotRun {
+  _id?: string;
+  id: string;
+  botId: string;
+  botName: string;
+  userId: string;
+  status: BotRunStatus;
+  parameters: Record<string, unknown>;
+  triggerText?: string;
+  result?: unknown;
+  error?: string;
+  /** True after WA/user was notified of terminal status */
+  notified?: boolean;
+  createdAt: Date;
+  startedAt?: Date;
+  finishedAt?: Date;
+  updatedAt: Date;
+}
+
 export interface PersonaProfile {
   _id?: string;
   userId: string;

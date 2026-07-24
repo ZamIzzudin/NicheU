@@ -50,20 +50,43 @@ RUN npm run build
 # ---------- runtime ----------
 FROM base AS runtime
 WORKDIR /app
-ENV NODE_ENV=production
+ENV NODE_ENV=production \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
+# System deps: tini/curl + Firefox libraries for Playwright headless search bot
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     tini \
     curl \
+    libgtk-3-0 \
+    libx11-xcb1 \
+    libasound2 \
+    libdbus-glib-1-2 \
+    libxt6 \
+    libxrender1 \
+    libpci3 \
+    libpangocairo-1.0-0 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libdrm2 \
+    libgbm1 \
+    libxkbcommon0 \
+    libnss3 \
+    libnspr4 \
+    fonts-liberation \
   && rm -rf /var/lib/apt/lists/*
 
 # server runtime deps + build output
 COPY --from=server-deps /app/node_modules ./node_modules
 COPY --from=server-build /app/dist ./dist
-COPY package.json ./
+COPY package.json package-lock.json* ./
 COPY server/domain/persona/nisa-fewshot.json ./server/domain/persona/nisa-fewshot.json
 # also ship compiled-data module fallback already in dist
+
+# Install Firefox browser binary for Playwright (google_search bot)
+RUN npx playwright install firefox \
+  || (npm install playwright@1.49.1 && npx playwright install firefox) \
+  || echo "WARN: playwright firefox install failed — google_search bot may not work"
 
 # web runtime
 COPY --from=web-build /app/web/.next ./web/.next

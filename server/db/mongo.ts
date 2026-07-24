@@ -1,5 +1,7 @@
 import { Collection, Db, MongoClient } from 'mongodb';
 import {
+  AutomationBot,
+  BotRun,
   ConversationState,
   DailyMood,
   DailySchedule,
@@ -25,6 +27,8 @@ export class Database {
   conversations!: Collection<ConversationState>;
   moods!: Collection<DailyMood>;
   reminders!: Collection<Reminder>;
+  bots!: Collection<AutomationBot>;
+  botRuns!: Collection<BotRun>;
   meta!: Collection<{ _id: string; value: unknown; updatedAt: Date }>;
 
   constructor(uri = env.mongodbUri) {
@@ -44,6 +48,8 @@ export class Database {
     this.conversations = this.db.collection<ConversationState>('conversations');
     this.moods = this.db.collection<DailyMood>('daily_moods');
     this.reminders = this.db.collection<Reminder>('reminders');
+    this.bots = this.db.collection<AutomationBot>('bots');
+    this.botRuns = this.db.collection<BotRun>('bot_runs');
     this.meta = this.db.collection('meta');
 
     await Promise.all([
@@ -63,6 +69,13 @@ export class Database {
       this.reminders.createIndex({ userId: 1, status: 1, dueAt: 1 }),
       this.reminders.createIndex({ status: 1, dueAt: 1 }),
       this.reminders.createIndex({ userId: 1, updatedAt: -1 }),
+      this.bots.createIndex({ name: 1 }, { unique: true }),
+      this.bots.createIndex({ id: 1 }, { unique: true }),
+      this.bots.createIndex({ enabled: 1 }),
+      this.botRuns.createIndex({ id: 1 }, { unique: true }),
+      this.botRuns.createIndex({ userId: 1, status: 1, createdAt: -1 }),
+      this.botRuns.createIndex({ status: 1, createdAt: 1 }),
+      this.botRuns.createIndex({ botName: 1, createdAt: -1 }),
     ]);
   }
 
