@@ -1,6 +1,10 @@
-# Niche Daily — Dokploy friendly
-# ONE public port: 3000 (Web UI + /api proxy)
-# API listens internally on 4000 only.
+# Niche Daily — Dokploy + Cloudflare friendly
+#
+# Public app port INSIDE container: 3000 (Next.js UI)
+# Internal API: 4000 (not published; Next rewrites /api/*)
+#
+# For Dokploy domains: set Domain Port = 3000 on service "niche-daily"
+# Prefer NOT binding host ports (Traefik uses docker network). Optional host map via HOST_WEB_PORT.
 
 services:
   mongo:
@@ -23,8 +27,11 @@ services:
     depends_on:
       mongo:
         condition: service_healthy
+    # Dokploy/Traefik reaches container port 3000 over docker network
+    expose:
+      - "3000"
+    # Optional host publish (can cause conflicts; leave empty/unset on Dokploy if possible)
     ports:
-      # Dokploy domain must target this container port
       - "${HOST_WEB_PORT:-3000}:3000"
     environment:
       MONGODB_URI: mongodb://mongo:27017/niche-daily
@@ -34,10 +41,8 @@ services:
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
       AUTHORIZED_PHONE: ${AUTHORIZED_PHONE}
       API_TOKEN: ${API_TOKEN:-change-me}
-      # Internal API port (not published)
       API_PORT: 4000
       PORT: 4000
-      # Public web port (Dokploy domain)
       WEB_PORT: 3000
       TIMEZONE: ${TIMEZONE:-Asia/Jakarta}
       ENABLE_QUIET_HOURS: ${ENABLE_QUIET_HOURS:-true}
@@ -61,15 +66,12 @@ services:
           "CMD",
           "node",
           "-e",
-          "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))",
+          "Promise.all([fetch('http://127.0.0.1:3000/'),fetch('http://127.0.0.1:4000/api/health')]).then(async ([w,a])=>{if(w.status>=500||!a.ok)process.exit(1)}).catch(()=>process.exit(1))",
         ]
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 60s
-    labels:
-      # Helpful for Traefik-based platforms (Dokploy may also set its own labels)
-      - traefik.enable=true
+      start_period: 90s
 
 volumes:
   niche_mongo_data:
