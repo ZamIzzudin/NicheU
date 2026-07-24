@@ -54,7 +54,7 @@ export class ConversationService {
             {
               role: 'user',
               content: `${existingSummary ? `Ringkasan lama:\n${existingSummary}\n\n` : ''}Percakapan baru:\n${overflow
-                .map((m) => `${m.role}: ${m.content}`)
+                .map((m) => `${m.role}: ${typeof m.content === 'string' ? m.content : JSON.stringify(m.content)}`)
                 .join('\n')}`,
             },
           ],

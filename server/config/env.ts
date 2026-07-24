@@ -35,6 +35,11 @@ export const env = {
   apiKey: required('API_KEY', ''),
   apiModel: required('API_MODEL', 'gpt-4o-mini'),
   embeddingModel: required('EMBEDDING_MODEL', 'text-embedding-3-small'),
+  /** Vision-capable model for image understanding (defaults to API_MODEL). */
+  visionModel: process.env.VISION_MODEL || process.env.API_MODEL || 'gpt-4o-mini',
+  enableImageUnderstanding: bool('ENABLE_IMAGE_UNDERSTANDING', true),
+  /** Max image bytes to download/describe (default 5MB). */
+  maxImageBytes: num('MAX_IMAGE_BYTES', 5 * 1024 * 1024),
   // Always store/lookup as digits only so API + WA bot share the same key
   authorizedPhone: normalizeUserId(required('AUTHORIZED_PHONE', '')),
   port: num('PORT', 3000),

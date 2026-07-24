@@ -129,6 +129,81 @@ export class Client {
     }
   }
 
+  /**
+   * Describe an image with a vision-capable chat model.
+   * Returns plain Indonesian text the partner-agent can treat as context.
+   */
+  async describeImage(
+    dataUrl: string,
+    options: { caption?: string; mime?: string } = {}
+  ): Promise<string> {
+    const baseUrl = this.activeModel.base_url || env.apiBaseUrl;
+    const url = `${baseUrl.replace(/\/$/, '')}/chat/completions`;
+    const model = env.visionModel || this.activeModel.name;
+    const captionHint = options.caption
+      ? `Caption dari pengirim: "${options.caption}"`
+      : 'Tidak ada caption dari pengirim.';
+
+    const body = {
+      model,
+      temperature: 0.2,
+      max_tokens: 700,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text:
+                'Kamu membantu asisten chat WhatsApp memahami foto yang dikirim user.\n' +
+                'Deskripsikan gambar secara ringkas tapi cukup detail supaya bisa dibalas natural.\n' +
+                'Bahasa: Indonesia, gaya faktual.\n' +
+                'Sebutkan: objek utama, teks terlihat (OCR jika ada), suasana, orang (tanpa nebak identitas sensitif), lokasi/konteks jika jelas.\n' +
+                'Jangan mengarang detail yang tidak terlihat.\n' +
+                `${captionHint}\n` +
+                'Output: 3-8 kalimat deskripsi saja, tanpa markdown.',
+            },
+            {
+              type: 'image_url',
+              image_url: { url: dataUrl, detail: 'auto' as const },
+            },
+          ],
+        },
+      ],
+    };
+
+    try {
+      const response = await this.http.post(url, body, {
+        headers: {
+          Authorization: `Bearer ${this.activeModel.api_key}`,
+          'Content-Type': 'application/json',
+        },
+        responseType: 'json',
+      });
+
+      if (response.status >= 400) {
+        throw new ApiError('status', response.status, JSON.stringify(response.data));
+      }
+
+      const content = response.data?.choices?.[0]?.message?.content;
+      if (typeof content === 'string' && content.trim()) return content.trim();
+      if (Array.isArray(content)) {
+        const text = content
+          .map((p: any) => (typeof p === 'string' ? p : p?.text || ''))
+          .join(' ')
+          .trim();
+        if (text) return text;
+      }
+      throw new ApiError('parse', undefined, 'Empty vision response');
+    } catch (error: any) {
+      if (error instanceof ApiError) throw error;
+      if (axios.isAxiosError(error)) {
+        throw new ApiError('request', error.response?.status, error.message);
+      }
+      throw new ApiError('request', undefined, error.message);
+    }
+  }
+
   async embed(text: string): Promise<number[]> {
     const url = `${env.apiBaseUrl}/embeddings`;
     try {

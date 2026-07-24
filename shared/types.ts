@@ -182,7 +182,8 @@ export interface ConversationState {
   userId: string;
   messages: Array<{
     role: 'system' | 'user' | 'assistant' | 'tool';
-    content: string;
+    /** Text history preferred; multimodal parts allowed for vision turns. */
+    content: string | Array<Record<string, unknown>>;
     tool_call_id?: string;
     tool_calls?: unknown[];
     name?: string;

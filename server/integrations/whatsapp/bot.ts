@@ -4,6 +4,7 @@ import makeWASocket, {
   useMultiFileAuthState,
   fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
+  downloadMediaMessage,
 } from '@whiskeysockets/baileys';
 import pino from 'pino';
 import { Boom } from '@hapi/boom';
@@ -52,12 +53,13 @@ export class WhatsAppBot {
 
   /**
    * Debounce multipesan user bubbles into one agent turn.
-   * Waits USER_BUBBLE_DEBOUNCE_SEC after last bubble, then merges texts.
+   * Waits USER_BUBBLE_DEBOUNCE_SEC after last bubble, then merges texts + image contexts.
    */
   private pendingBubbles = new Map<
     string,
     {
       texts: string[];
+      imageContexts: string[];
       replyJid: string;
       timer: NodeJS.Timeout;
       lastAt: number;
@@ -405,13 +407,19 @@ export class WhatsAppBot {
             this.phoneToLid.set(identity.phone, identity.lid);
           }
 
-          const text = this.extractText(message);
-          if (!text) continue;
-
           const userId = identity.phone || this.authorizedPhone;
           const replyJid = from; // reply on same chat jid (may be @lid)
+          const text = this.extractText(message);
+          const imageContext = await this.extractImageContext(message);
+
+          // Skip empty events (no text and no image we could describe)
+          if (!text && !imageContext) continue;
+
           this.lastUserMessageAt = Date.now();
-          this.enqueueUserBubble(userId, replyJid, text);
+          this.enqueueUserBubble(userId, replyJid, {
+            text: text || undefined,
+            imageContext: imageContext || undefined,
+          });
         }
       });
     } catch (error: any) {
@@ -472,25 +480,100 @@ export class WhatsAppBot {
   }
 
   private extractText(message: any): string | null {
-    return (
+    const text =
       message.message?.conversation ||
       message.message?.extendedTextMessage?.text ||
       message.message?.imageMessage?.caption ||
-      null
+      message.message?.videoMessage?.caption ||
+      message.message?.documentMessage?.caption ||
+      message.message?.ephemeralMessage?.message?.imageMessage?.caption ||
+      null;
+    if (typeof text !== 'string') return null;
+    const trimmed = text.trim();
+    return trimmed || null;
+  }
+
+  private hasImageMessage(message: any): boolean {
+    return Boolean(
+      message.message?.imageMessage ||
+        message.message?.ephemeralMessage?.message?.imageMessage ||
+        message.message?.viewOnceMessage?.message?.imageMessage ||
+        message.message?.viewOnceMessageV2?.message?.imageMessage
     );
+  }
+
+  /**
+   * Download WhatsApp image and describe it via vision model.
+   * Result is plain text context merged into the chat prompt.
+   */
+  private async extractImageContext(message: any): Promise<string | null> {
+    if (!env.enableImageUnderstanding) return null;
+    if (!this.hasImageMessage(message)) return null;
+    if (!this.socket) return '[User mengirim gambar, tapi socket belum siap.]';
+
+    try {
+      const caption =
+        message.message?.imageMessage?.caption ||
+        message.message?.ephemeralMessage?.message?.imageMessage?.caption ||
+        undefined;
+      const mime =
+        message.message?.imageMessage?.mimetype ||
+        message.message?.ephemeralMessage?.message?.imageMessage?.mimetype ||
+        'image/jpeg';
+
+      console.log('🖼  Downloading WhatsApp image for vision...');
+      const buffer = (await downloadMediaMessage(
+        message,
+        'buffer',
+        {},
+        {
+          logger: this.logger,
+          // reupload helper required by Baileys downloadMediaMessage
+          reuploadRequest: this.socket.updateMediaMessage.bind(this.socket),
+        }
+      )) as Buffer;
+
+      if (!buffer?.length) {
+        console.warn('Image download empty');
+        return '[User mengirim gambar, tapi gagal diunduh.]';
+      }
+      if (buffer.length > env.maxImageBytes) {
+        console.warn(`Image too large: ${buffer.length} bytes (max ${env.maxImageBytes})`);
+        return '[User mengirim gambar terlalu besar untuk diproses.]';
+      }
+
+      const dataUrl = `data:${mime};base64,${buffer.toString('base64')}`;
+      console.log(`👁  Describing image via vision model (${env.visionModel})...`);
+      const description = await this.client.describeImage(dataUrl, {
+        caption: typeof caption === 'string' ? caption : undefined,
+        mime,
+      });
+      console.log(`✓ Image described (${description.slice(0, 120)}...)`);
+      return description;
+    } catch (error: any) {
+      console.warn('Image understand failed:', error?.message || error);
+      return '[User mengirim gambar, tapi aku gagal membacanya.]';
+    }
   }
 
   /**
    * Collect multipesan bubbles, wait until user stops typing/sending
    * for USER_BUBBLE_DEBOUNCE_SEC (default 120s), then process as one prompt.
    */
-  private enqueueUserBubble(userId: string, replyJid: string, text: string) {
+  private enqueueUserBubble(
+    userId: string,
+    replyJid: string,
+    payload: { text?: string; imageContext?: string }
+  ) {
     const waitMs = Math.max(5, env.userBubbleDebounceSec) * 1000;
+    const text = payload.text?.trim() || '';
+    const imageContext = payload.imageContext?.trim() || '';
     const existing = this.pendingBubbles.get(userId);
 
     if (existing) {
       clearTimeout(existing.timer);
-      existing.texts.push(text);
+      if (text) existing.texts.push(text);
+      if (imageContext) existing.imageContexts.push(imageContext);
       existing.replyJid = replyJid;
       existing.lastAt = Date.now();
       existing.timer = setTimeout(() => {
@@ -499,7 +582,7 @@ export class WhatsAppBot {
         );
       }, waitMs);
       console.log(
-        `⏳ Bubble buffered (${existing.texts.length}) from ${userId}; wait ${env.userBubbleDebounceSec}s`
+        `⏳ Bubble buffered (text=${existing.texts.length}, img=${existing.imageContexts.length}) from ${userId}; wait ${env.userBubbleDebounceSec}s`
       );
       return;
     }
@@ -511,17 +594,44 @@ export class WhatsAppBot {
     }, waitMs);
 
     this.pendingBubbles.set(userId, {
-      texts: [text],
+      texts: text ? [text] : [],
+      imageContexts: imageContext ? [imageContext] : [],
       replyJid,
       timer,
       lastAt: Date.now(),
     });
     console.log(
-      `⏳ First bubble from ${userId}; wait ${env.userBubbleDebounceSec}s for more...`
+      `⏳ First bubble from ${userId}${imageContext ? ' (+image)' : ''}; wait ${env.userBubbleDebounceSec}s for more...`
     );
 
     // Soft presence while waiting (best effort)
     this.socket?.sendPresenceUpdate('available', replyJid).catch(() => undefined);
+  }
+
+  private mergeBubblePayload(pending: {
+    texts: string[];
+    imageContexts: string[];
+  }): string {
+    const textPart = pending.texts.map((t) => t.trim()).filter(Boolean).join('\n');
+    const imageParts = pending.imageContexts.map((d) => d.trim()).filter(Boolean);
+
+    if (!imageParts.length) return textPart;
+
+    const imageBlock = imageParts
+      .map((desc, i) => {
+        const n = imageParts.length > 1 ? ` ${i + 1}` : '';
+        return `[Foto${n} yang user kirim]\n${desc}`;
+      })
+      .join('\n\n');
+
+    if (!textPart) {
+      return (
+        `${imageBlock}\n\n` +
+        '(User mengirim foto di atas. Balas natural seperti chat WhatsApp, tanggapi isi fotonya.)'
+      );
+    }
+
+    return `${textPart}\n\n${imageBlock}`;
   }
 
   private async flushUserBubbles(userId: string) {
@@ -540,10 +650,7 @@ export class WhatsAppBot {
       return;
     }
 
-    const merged = pending.texts
-      .map((t) => t.trim())
-      .filter(Boolean)
-      .join('\n');
+    const merged = this.mergeBubblePayload(pending);
     if (!merged) return;
 
     const replyJid = pending.replyJid;
@@ -553,7 +660,7 @@ export class WhatsAppBot {
       await this.proactiveService.suppressWhileUserActive(userId, 25);
 
       console.log(
-        `\n📩 ${userId} (${pending.texts.length} bubble(s) merged):\n${merged}`
+        `\n📩 ${userId} (${pending.texts.length} text, ${pending.imageContexts.length} image merged):\n${merged.slice(0, 500)}`
       );
       await this.processMessage(replyJid, userId, merged);
     } catch (error) {

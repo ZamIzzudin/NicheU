@@ -1,6 +1,12 @@
+/** OpenAI-style multimodal content parts (vision). */
+export type ContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string; detail?: 'auto' | 'low' | 'high' } };
+
 export interface Message {
   role: 'system' | 'user' | 'assistant' | 'tool';
-  content: string;
+  /** String for normal chat; array for vision turns. */
+  content: string | ContentPart[];
   tool_call_id?: string;
   tool_calls?: ToolCall[];
   name?: string;
