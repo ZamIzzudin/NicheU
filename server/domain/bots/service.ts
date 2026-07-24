@@ -421,27 +421,49 @@ export class BotService {
 
     const bot = (await this.getByName(run.botName)) || null;
     const title = bot?.title || run.botName;
+    const resultObj =
+      run.result && typeof run.result === 'object'
+        ? (run.result as Record<string, unknown>)
+        : null;
+    const humanChat = resultObj?.notifyStyle === 'human_chat';
     let text = '';
 
     if (run.status === 'succeeded') {
       const summary = this.summarizeResult(run.result);
-      text =
-        (bot?.successMessageHint
-          ? `${bot.successMessageHint}\n\n`
-          : `bot *${title}* udah kelarr ✅\n\n`) +
-        (summary ? `${summary}\n\n` : '') +
-        `id: ${run.id}`;
+      if (humanChat) {
+        // Natural persona chat only — no "bot finished", no run id, no link dump
+        text = summary || 'udah aku cek yaa';
+      } else {
+        text =
+          (bot?.successMessageHint
+            ? `${bot.successMessageHint}\n\n`
+            : `bot *${title}* udah kelarr\n\n`) + (summary ? `${summary}` : '');
+      }
     } else {
-      text =
-        (bot?.failureMessageHint
-          ? `${bot.failureMessageHint}\n\n`
-          : `aduuh bot *${title}* gagal ❌\n\n`) +
-        `${run.error || 'unknown error'}\n\n` +
-        `id: ${run.id}`;
+      if (humanChat) {
+        text =
+          this.summarizeResult(run.result) ||
+          'waduh barusan gagal nyariin 😞\n\ncoba lagi bentar yaa';
+      } else {
+        // Soften technical errors for chat
+        const err = String(run.error || 'unknown error');
+        const soft =
+          /captcha|blocked|quota|429|timeout/i.test(err)
+            ? 'aduuh barusan macet pas lagi ngerjain\n\ncoba lagi nanti yaa'
+            : `aduuh gagal barusan\n\n${err.slice(0, 200)}`;
+        text = soft;
+      }
     }
 
+    // Never append internal run ids in user-facing notify
+    text = text
+      .replace(/\bid:\s*brun_\w+/gi, '')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim()
+      .slice(0, 2800);
+
     try {
-      await this.notify(run.userId, text.slice(0, 3500));
+      await this.notify(run.userId, text);
       await this.db.botRuns.updateOne(
         { id: run.id },
         { $set: { notified: true, updatedAt: new Date() } }
@@ -456,19 +478,23 @@ export class BotService {
     if (typeof result === 'string') return result.slice(0, 2800);
     if (typeof result === 'object') {
       const obj = result as Record<string, unknown>;
-      // Prefer human summaries from handlers (e.g. google_search)
+      // Prefer human chat body from handlers (e.g. google_search)
       if (typeof obj.message === 'string' && obj.message.trim()) {
         return obj.message.trim().slice(0, 2800);
       }
       if (typeof obj.summary === 'string' && obj.summary.trim()) {
         return obj.summary.trim().slice(0, 2800);
       }
+      // Never dump results[] arrays as numbered link lists to WA
+      if (Array.isArray(obj.results)) {
+        return '';
+      }
     }
     try {
       const s = JSON.stringify(result, null, 0);
-      return s.length > 1200 ? s.slice(0, 1197) + '...' : s;
+      return s.length > 800 ? s.slice(0, 797) + '...' : s;
     } catch {
-      return String(result).slice(0, 1200);
+      return String(result).slice(0, 800);
     }
   }
 
@@ -584,12 +610,13 @@ export class BotService {
         },
       ],
       enabled: true,
-      timeoutMs: 3 * 60 * 1000,
-      config: { defaultLimit: 5 },
+      timeoutMs: 4 * 60 * 1000,
+      config: { defaultLimit: 5, readPages: 3 },
       ackMessageHint:
         'bisaaa\n\naku carikan duluu yaa\n\nnanti aku kabarin kalo udah ketemu',
-      successMessageHint: 'nih yang aku nemu ✅',
-      failureMessageHint: 'aduuh, barusan gagal nyariin ❌',
+      // Empty hints: notify uses pure humanized message from handler
+      successMessageHint: '',
+      failureMessageHint: '',
     });
 
     if (count > 0) {

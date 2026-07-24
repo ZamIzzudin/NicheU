@@ -75,8 +75,9 @@ register('demo_long_job', async (params, ctx) => {
 });
 
 /**
- * Google web search via Playwright Firefox (background bot).
- * Human-like typing/delays; falls back to Bing/DDG if Google blocks.
+ * Web search via Playwright (background).
+ * After SERP: open top pages, rekap with LLM into natural multipesan chat.
+ * Empty results → soft "gak nemu" (not hard error).
  */
 register('google_search', async (params, ctx) => {
   const query = String(params.query || params.q || '').trim();
@@ -88,14 +89,25 @@ register('google_search', async (params, ctx) => {
     limit,
     log: (m, extra) => ctx.log(m, extra),
   });
-  if (!result.ok && !result.results.length) {
-    throw new Error(result.warning || `No search results for: ${query}`);
-  }
-  // Prefer human-readable summary for WA notify
+
+  const message =
+    (result.message && result.message.trim()) ||
+    (result.summary && result.summary.trim()) ||
+    `waduh barusan aku cariin\n\ntapi gak nemu yang jelas 😞`;
+
+  // Always succeed with natural reply body — notify uses message only
   return {
-    ...result,
-    // BotService.summarizeResult uses JSON; we also put plain summary at top-level string path via message fields
-    message: result.summary,
+    ok: result.ok || result.count > 0,
+    query: result.query,
+    count: result.count,
+    engine: result.engine,
+    pagesRead: result.pagesRead || 0,
+    tookMs: result.tookMs,
+    // Keep raw for logs/debug storage, but notify must not dump this
+    results: result.results,
+    message,
+    // Flag for BotService: notify with pure human message (no run id / bot chrome)
+    notifyStyle: 'human_chat',
   };
 });
 
