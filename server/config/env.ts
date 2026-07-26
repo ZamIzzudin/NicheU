@@ -78,6 +78,10 @@ export const env = {
   whatsappAuthDir: process.env.WHATSAPP_AUTH_DIR || 'whatsapp_auth',
   /** Wait this long after last user bubble before replying (merge multipesan). */
   userBubbleDebounceSec: num('USER_BUBBLE_DEBOUNCE_SEC', 120),
+  /** SerpAPI key for web search (https://serpapi.com). Required for google_search bot. */
+  serpApiKey: process.env.SERPAPI_API_KEY || process.env.SERP_API_KEY || '',
+  /** SerpAPI engine: google | bing | duckduckgo */
+  serpApiEngine: (process.env.SERPAPI_ENGINE || 'google').toLowerCase(),
 };
 
 export type AppEnv = typeof env;

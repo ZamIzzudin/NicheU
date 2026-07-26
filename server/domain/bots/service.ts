@@ -554,16 +554,16 @@ export class BotService {
   async ensureDemoBots(): Promise<void> {
     const count = await this.db.bots.countDocuments({});
 
-    // Always ensure google_search bot (replaces broken DuckDuckGo sync tool)
+    // Always ensure google_search bot (SerpAPI → human intisari notify)
     await this.upsert({
       name: 'google_search',
-      title: 'Google Search',
+      title: 'Web Search (SerpAPI)',
       description:
-        'Mencari informasi di internet (Google, browser Firefox headless). ' +
+        'Mencari informasi di internet via SerpAPI (Google). ' +
         'PAKAI otomatis saat user minta tolong dicarikan info, meski kalimatnya santai dan tidak menyebut "google" atau "bot". ' +
         'Contoh niat: "bisa cariin ... gak?", "cariin dong ...", "tolong carikan ...", "tau gak ...", ' +
         '"ada info ...", cek harga/berita/jadwal/cuaca/fakta terbaru, atau hal yang butuh data web. ' +
-        'Background job: setelah jalan, bilang nanti dikabari; hasil final via WhatsApp. ' +
+        'Background job: setelah jalan, bilang nanti dikabari; hasil final via WhatsApp (intisari natural, bukan dump link). ' +
         'Param query = intisari yang dicari (bukan seluruh basabasi user).',
       triggers: [
         'cariin',
@@ -610,8 +610,8 @@ export class BotService {
         },
       ],
       enabled: true,
-      timeoutMs: 4 * 60 * 1000,
-      config: { defaultLimit: 5, readPages: 3 },
+      timeoutMs: 90 * 1000,
+      config: { defaultLimit: 5, provider: 'serpapi' },
       ackMessageHint:
         'bisaaa\n\naku carikan duluu yaa\n\nnanti aku kabarin kalo udah ketemu',
       // Empty hints: notify uses pure humanized message from handler

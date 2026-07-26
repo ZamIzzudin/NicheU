@@ -290,7 +290,7 @@ export class ToolRegistry {
         };
       },
       web_search: async (args, ctx) => {
-        // Legacy sync tool is broken/unreliable (DuckDuckGo). Route to background bot.
+        // Route to background SerpAPI bot (google_search).
         const query = String(args.query || args.q || '').trim();
         if (!query) return { success: false, error: 'query required' };
         if (!ctx?.userId || !ctx?.botService) {
@@ -321,7 +321,7 @@ export class ToolRegistry {
           migrated: true,
           run: result.run,
           instruction:
-            'Search dijalankan di BACKGROUND lewat bot google_search (Playwright Firefox). ' +
+            'Search dijalankan di BACKGROUND lewat bot google_search (SerpAPI). ' +
             'Kasih tau user "nanti aku infoin hasilnya ya". Jangan ngarang hasil sekarang.',
           ackHint: result.ackHint,
         };
@@ -619,7 +619,7 @@ export class ToolRegistry {
         id: 'builtin_web_search',
         name: 'web_search',
         description:
-          'Cari info di internet (background Google via Playwright). Panggil otomatis saat user minta dicarikan sesuatu dengan bahasa natural: "cariin", "bisa bantu cari ... gak?", "tolong carikan", "tau gak ...", cek harga/berita/jadwal/fakta terbaru. query = intisari topik (bukan full basabasi). Setelah queue, bilang nanti dikabari; hasil menyusul di WA. Jangan mengarang hasil.',
+          'Cari info di internet (background via SerpAPI/Google). Panggil otomatis saat user minta dicarikan sesuatu dengan bahasa natural: "cariin", "bisa bantu cari ... gak?", "tolong carikan", "tau gak ...", cek harga/berita/jadwal/fakta terbaru. query = intisari topik (bukan full basabasi). Setelah queue, bilang nanti dikabari; hasil menyusul di WA (intisari, bukan dump link). Jangan mengarang hasil.',
         category: 'information',
         functionCode: 'async function execute({ query }) { return { query }; }',
         parameters: [

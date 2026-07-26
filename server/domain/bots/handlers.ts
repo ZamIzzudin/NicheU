@@ -1,5 +1,7 @@
 import axios from 'axios';
-import { runGoogleSearchBot } from './googleSearch';
+import { runSerpApiSearch } from '../../integrations/search/serpapi';
+import { humanizeSearchResult } from './searchSynthesize';
+import type { SearchItem, SearchResult } from './searchTypes';
 
 export type BotHandlerContext = {
   userId: string;
@@ -75,41 +77,113 @@ register('demo_long_job', async (params, ctx) => {
 });
 
 /**
- * Web search via Playwright (background).
- * After SERP: open top pages, rekap with LLM into natural multipesan chat.
- * Empty results → soft "gak nemu" (not hard error).
+ * Web search via SerpAPI (background).
+ * Snippets + answer box / knowledge graph → LLM rekap intisari natural multipesan.
+ * Empty results → soft "gak nemu" (not hard error / no link dump).
  */
 register('google_search', async (params, ctx) => {
   const query = String(params.query || params.q || '').trim();
   if (!query) throw new Error('query required');
   const limit = Number(params.limit || ctx.config?.defaultLimit || 5);
-  ctx.log(`google_search query="${query}" limit=${limit}`);
-  const result = await runGoogleSearchBot({
-    query,
-    limit,
-    log: (m, extra) => ctx.log(m, extra),
-  });
+  ctx.log(`google_search (serpapi) query="${query}" limit=${limit}`);
 
-  const message =
-    (result.message && result.message.trim()) ||
-    (result.summary && result.summary.trim()) ||
-    `waduh barusan aku cariin\n\ntapi gak nemu yang jelas 😞`;
+  let message = '';
+  let ok = false;
+  let count = 0;
+  let engine: string = 'serpapi';
+  let tookMs = 0;
+  let results: SearchItem[] = [];
+  let warning: string | undefined;
 
-  // Always succeed with natural reply body — notify uses message only
+  try {
+    const serp = await runSerpApiSearch({
+      query,
+      limit,
+      log: (m, extra) => ctx.log(m, extra),
+    });
+
+    engine = serp.engine;
+    tookMs = serp.tookMs;
+    count = serp.count;
+    ok = serp.ok;
+    warning = serp.warning;
+    results = serp.results.map((r) => ({
+      rank: r.rank,
+      title: r.title,
+      url: r.url,
+      snippet: r.snippet,
+    }));
+
+    if (serp.answerBox || serp.knowledgeGraph) {
+      const extra = [serp.answerBox, serp.knowledgeGraph].filter(Boolean).join(' | ');
+      if (results[0]) {
+        results[0] = {
+          ...results[0],
+          snippet: cleanSnippet(`${extra}. ${results[0].snippet || ''}`),
+        };
+      } else if (extra) {
+        results = [
+          {
+            rank: 1,
+            title: query,
+            url: '',
+            snippet: cleanSnippet(extra),
+          },
+        ];
+        count = 1;
+        ok = true;
+      }
+    }
+
+    const raw: SearchResult = {
+      ok,
+      engine,
+      query,
+      count,
+      results,
+      tookMs,
+      warning,
+    };
+
+    const human = await humanizeSearchResult(raw, (m) => ctx.log(m));
+    message = human.message;
+  } catch (error: any) {
+    const err = error?.message || String(error);
+    ctx.log(`serpapi failed: ${err}`);
+    warning = err;
+    if (/SERPAPI_API_KEY missing|auth failed/i.test(err)) {
+      message =
+        'aduuh fitur carinya belum siap 😞\n\n(kunci SerpAPI belum diset di server)\n\ncoba bilang admin yaa';
+    } else if (/429|quota|rate limit/i.test(err)) {
+      message = 'waduh barusan kuota search-nya abis 😞\n\ncoba lagi nanti yaa';
+    } else {
+      message = 'waduh barusan gagal nyariin 😞\n\ncoba lagi bentar yaa';
+    }
+  }
+
+  if (!message.trim()) {
+    message = `waduh barusan aku cariin\n\ntapi gak nemu yang jelas 😞`;
+  }
+
   return {
-    ok: result.ok || result.count > 0,
-    query: result.query,
-    count: result.count,
-    engine: result.engine,
-    pagesRead: result.pagesRead || 0,
-    tookMs: result.tookMs,
-    // Keep raw for logs/debug storage, but notify must not dump this
-    results: result.results,
+    ok: ok || count > 0,
+    query,
+    count,
+    engine,
+    tookMs,
+    results,
+    warning,
     message,
-    // Flag for BotService: notify with pure human message (no run id / bot chrome)
     notifyStyle: 'human_chat',
   };
 });
+
+function cleanSnippet(s: string): string {
+  return String(s || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 800);
+}
 
 export function getBotHandler(name: string): BotHandler | undefined {
   return handlers.get(name);
