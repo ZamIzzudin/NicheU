@@ -1,10 +1,21 @@
 import dotenv from 'dotenv';
 import path from 'path';
 
-dotenv.config({ path: path.resolve(process.cwd(), '.env') });
+// Load .env for local dev only. Never override real process env (Docker/Dokploy).
+dotenv.config({
+  path: path.resolve(process.cwd(), '.env'),
+  override: false,
+});
+
+function trimEnv(name: string): string | undefined {
+  const v = process.env[name];
+  if (v == null) return undefined;
+  const t = String(v).trim();
+  return t.length ? t : undefined;
+}
 
 function required(name: string, fallback?: string): string {
-  const value = process.env[name] ?? fallback;
+  const value = trimEnv(name) ?? fallback;
   if (!value) {
     throw new Error(`Missing required env: ${name}`);
   }
@@ -78,10 +89,31 @@ export const env = {
   whatsappAuthDir: process.env.WHATSAPP_AUTH_DIR || 'whatsapp_auth',
   /** Wait this long after last user bubble before replying (merge multipesan). */
   userBubbleDebounceSec: num('USER_BUBBLE_DEBOUNCE_SEC', 120),
-  /** SerpAPI key for web search (https://serpapi.com). Required for google_search bot. */
-  serpApiKey: process.env.SERPAPI_API_KEY || process.env.SERP_API_KEY || '',
+  /**
+   * Snapshot of SerpAPI key at boot (may be empty if compose omitted it).
+   * Prefer getSerpApiKey() at call-time so live process.env is always used.
+   */
+  get serpApiKey(): string {
+    return getSerpApiKey();
+  },
   /** SerpAPI engine: google | bing | duckduckgo */
-  serpApiEngine: (process.env.SERPAPI_ENGINE || 'google').toLowerCase(),
+  get serpApiEngine(): string {
+    return (trimEnv('SERPAPI_ENGINE') || 'google').toLowerCase();
+  },
 };
+
+/** Read SerpAPI key live from process.env (Docker/Dokploy-safe). */
+export function getSerpApiKey(): string {
+  return (
+    trimEnv('SERPAPI_API_KEY') ||
+    trimEnv('SERP_API_KEY') ||
+    trimEnv('SERPAPI_KEY') ||
+    ''
+  );
+}
+
+export function isSerpApiConfigured(): boolean {
+  return getSerpApiKey().length > 8;
+}
 
 export type AppEnv = typeof env;

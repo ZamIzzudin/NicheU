@@ -57,6 +57,13 @@ services:
       HISTORY_MAX_MESSAGES: ${HISTORY_MAX_MESSAGES:-24}
       WHATSAPP_AUTH_DIR: /app/whatsapp_auth
       ALLOW_LID_OWNER_FALLBACK: ${ALLOW_LID_OWNER_FALLBACK:-true}
+      # Web search (SerpAPI) — must be listed so Dokploy env reaches the container
+      SERPAPI_API_KEY: ${SERPAPI_API_KEY}
+      SERPAPI_ENGINE: ${SERPAPI_ENGINE:-google}
+      SERPAPI_HL: ${SERPAPI_HL:-id}
+      SERPAPI_GL: ${SERPAPI_GL:-id}
+      SERPAPI_LOCATION: ${SERPAPI_LOCATION:-}
+      SERPAPI_TIMEOUT_MS: ${SERPAPI_TIMEOUT_MS:-30000}
     volumes:
       - niche_wa_auth:/app/whatsapp_auth
     healthcheck:

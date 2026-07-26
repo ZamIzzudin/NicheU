@@ -5,6 +5,7 @@
 #   MONGODB_URI=.../niche-daily...
 #   AUTHORIZED_PHONE=628...
 #   API_KEY=...
+#   SERPAPI_API_KEY=...
 
 services:
   niche-daily:
@@ -18,11 +19,16 @@ services:
     env_file:
       - .env
     environment:
-      # Force docker port layout; keep external MONGODB_URI from env_file / Dokploy
+      # Force docker port layout; other secrets come from env_file / Dokploy injection
       API_PORT: 4000
       PORT: 4000
       WEB_PORT: 3000
       WHATSAPP_AUTH_DIR: /app/whatsapp_auth
+      # Explicit SerpAPI pass-through (Dokploy Environment → compose → container)
+      SERPAPI_API_KEY: ${SERPAPI_API_KEY}
+      SERPAPI_ENGINE: ${SERPAPI_ENGINE:-google}
+      SERPAPI_HL: ${SERPAPI_HL:-id}
+      SERPAPI_GL: ${SERPAPI_GL:-id}
     volumes:
       - niche_wa_auth:/app/whatsapp_auth
 

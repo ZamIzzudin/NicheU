@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { env } from '../../config/env';
+import { getSerpApiKey } from '../../config/env';
 
 export type SerpApiItem = {
   rank: number;
@@ -49,10 +49,11 @@ export async function runSerpApiSearch(options: {
   const log = options.log || ((m: string) => console.log('[serpapi]', m));
   if (!query) throw new Error('query required');
 
-  const apiKey = env.serpApiKey;
+  // Always read live process.env (Dokploy injects at runtime; do not rely on boot snapshot only)
+  const apiKey = getSerpApiKey();
   if (!apiKey) {
     throw new Error(
-      'SERPAPI_API_KEY missing. Get one at https://serpapi.com/manage-api-key and set in .env'
+      'SERPAPI_API_KEY missing in container env. Set it in Dokploy Environment and ensure compose passes SERPAPI_API_KEY=${SERPAPI_API_KEY}'
     );
   }
 

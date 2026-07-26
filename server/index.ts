@@ -52,7 +52,19 @@ async function main() {
     `🧠 Day memory: max ${env.dayHistoryMaxMessages || env.historyMaxMessages} turns/day; nightly sleep ${String(env.nightlyConsolidateHour).padStart(2, '0')}:${String(env.nightlyConsolidateMinute).padStart(2, '0')} ${env.timezone}`
   );
   console.log('⏰ Reminder collection ready (ephemeral, not long-term memory)');
-  console.log('🤖 Automation bots ready (manual, background + WA notify)\n');
+  console.log('🤖 Automation bots ready (manual, background + WA notify)');
+  {
+    const { isSerpApiConfigured, getSerpApiKey } = await import('./config/env');
+    if (isSerpApiConfigured()) {
+      const k = getSerpApiKey();
+      console.log(`🔎 SerpAPI: configured (key …${k.slice(-4)}, engine=${env.serpApiEngine})\n`);
+    } else {
+      console.warn(
+        '⚠ SerpAPI: SERPAPI_API_KEY not detected in process env — web_search will fail.\n' +
+          '  Dokploy: set SERPAPI_API_KEY in Environment, and compose must pass SERPAPI_API_KEY=${SERPAPI_API_KEY}\n'
+      );
+    }
+  }
 
   tools.setContext({
     memoryService,
