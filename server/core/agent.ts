@@ -9,7 +9,7 @@ export async function runAgentTurn(
   tools: ToolRegistry,
   history: Message[],
   onToken: (token: string) => void,
-  context?: { userId?: string }
+  context?: { userId?: string; onToolCall?: (name: string) => void }
 ): Promise<string> {
   const toolDefs = tools.definitions();
   let finalText = '';
@@ -47,6 +47,7 @@ export async function runAgentTurn(
       const displayArgs =
         argumentsStr.length > 180 ? argumentsStr.slice(0, 177) + '...' : argumentsStr;
       console.log(`  [tool] ${name}(${displayArgs})`);
+      context?.onToolCall?.(name);
     }
 
     const results = await tools.executeBatch(batch, context);

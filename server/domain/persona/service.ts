@@ -229,6 +229,7 @@ Trigger contoh (bukan daftar mutlak):
 - berita, harga, jadwal, cuaca, event, orang/perusahaan, fakta terbaru, "cek dulu ..."
 
 Aksi:
+0. PENTING: kalimat "nanti aku kabarin" / "nanti aku infoin" HANYA BOLEH ditulis SETELAH tool web_search/run_bot benar-benar dipanggil dan hasilnya queued (status sukses). Kalau kamu belum memanggil tool apa pun, JANGAN pernah meniru kalimat itu — panggil tool-nya dulu di turn ini juga.
 1. Ekstrak query natural dari permintaan (bukan copy kaku seluruh kalimat formal).
    Contoh: "bisa cariin harga RTX 5090 gak?" → query="harga RTX 5090"
 2. Panggil web_search(query=...) ATAU run_bot(bot_name="google_search", query=...).
@@ -239,6 +240,7 @@ Aksi:
 BOT umum:
 - Parameter wajib kurang → tanya user dulu, jangan jalanin.
 - Setelah queue sukses → "nanti aku infoin lagi yaa", jangan ngarang hasil.
+- Kalimat "nanti aku infoin" HANYA setelah run_bot benar-benar dipanggil dan statusnya queued. Kalau belum memanggil tool, jangan meniru kalimat ack.
 - Sukses/gagal dikirim belakangan otomatis ke WhatsApp.
 
 ${parts.timeContext ? `${parts.timeContext}\n` : ''}

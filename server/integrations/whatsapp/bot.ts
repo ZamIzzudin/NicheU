@@ -953,9 +953,10 @@ export class WhatsAppBot {
     });
 
     console.log(
-      `🤖 Agent turn (day=${day.conversationDate}, history=${nonSystemHistory.length} bubbles)...`
+      `🤖 Agent turn (day=${day.conversationDate}, history=${nonSystemHistory.length} bubbles, tools=${this.tools.definitions().length})...`
     );
     let responseText = '';
+    let searchToolCalled = false;
     const final = await runAgentTurn(
       this.client,
       this.tools,
@@ -963,10 +964,49 @@ export class WhatsAppBot {
       (token) => {
         responseText += token;
       },
-      { userId }
+      {
+        userId,
+        onToolCall: (name) => {
+          if (name === 'web_search' || name === 'run_bot') searchToolCalled = true;
+        },
+      }
     );
 
-    const reply = (final || responseText || 'Hmm, aku blank sebentar.\n\nUlangi ya.').trim();
+    let reply = (final || responseText || 'Hmm, aku blank sebentar.\n\nUlangi ya.').trim();
+
+    // Fallback penegak: model menjanjikan hasil background ("nanti aku kabarin")
+    // tapi TIDAK memanggil tool search apa pun → jalankan google_search otomatis.
+    // Hanya menimpa jawaban kalau modelnya memang cuma ack (bukan jawaban asli),
+    // supaya jawaban langsung yang benar tidak diganggu.
+    if (!searchToolCalled && isAckOnlyReply(reply)) {
+      const searchQuery = detectSearchQuery(text);
+      if (searchQuery) {
+        const botService = this.tools.getContext()?.botService;
+        if (botService) {
+          try {
+            const result = await botService.enqueueRun({
+              userId,
+              botName: 'google_search',
+              parameters: { query: searchQuery, limit: 5 },
+              triggerText: text,
+            });
+            if (result.status === 'queued') {
+              reply =
+                result.ackHint ||
+                'bisaaa\n\naku carikan duluu yaa\n\nnanti aku kabarin kalo udah ketemu';
+              console.log(
+                `🔎 Search fallback enqueued (query="${searchQuery}") — model tidak memanggil tool`
+              );
+            } else if (result.status === 'error') {
+              console.warn('Search fallback error:', result.error);
+            }
+          } catch (err) {
+            console.warn('Search fallback enqueue failed:', (err as Error)?.message || err);
+          }
+        }
+      }
+    }
+
     await this.sendTextBubbles(from, reply);
 
     // Persist only durable day chat (user/assistant). System/few-shot rebuilt each turn.
@@ -979,4 +1019,65 @@ export class WhatsAppBot {
     await this.proactiveService.enqueueIdleNudge(userId);
     console.log(`✓ Response sent (${this.splitIntoBubbles(reply).length} bubbles)\n`);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Search-intent detection (fallback bila model tidak memanggil tool search)
+// ---------------------------------------------------------------------------
+
+const SEARCH_VERB_RE =
+  /(^|[^a-z])(cariin|carikan|googlein|search|browsing)([^a-z]|$)|\b(cari)\b(?=.*(dong|yuk|dulu|tau|tahu|info|harga|jadwal|kapan|siapa|berapa|dimana|di mana|cuaca|berita|lokasi|konser|acara|event))/i;
+const SEARCH_HELP_RE = /\b(tolong|bantu|bantuin)\b/i;
+const SEARCH_LOOKUP_RE =
+  /\b(tau gak|taukah|tahu gak|ada info|info (tentang|soal)|berita|cuaca|harga|jadwal|jam (buka|tutup)|lokasi|apa itu|apa sih|apa yaa|bagaimana cara|gimana cara)\b/i;
+const SELF_REF_RE = /\b(aku|saya|gue|gw|kita|tadi|baru saja|kemarin)\b/i;
+
+/** Model menjanjikan hasil background ("nanti aku kabarin") tapi tidak ada action nyata. */
+const ACK_ONLY_REPLY_RE =
+  /(nanti aku (kabarin|kabari|infoin|infokan|bilang|kasih tahu|kirim)|nanti (aku )?dikabari|aku (carikan|cariin|cari) dulu+|bentar (aku )?(cari|cariin|carikan)|udah (aku )?cariin|nanti (aku )?balas)/i;
+
+function isAckOnlyReply(reply: string): boolean {
+  return ACK_ONLY_REPLY_RE.test(String(reply || '').toLowerCase());
+}
+
+const SEARCH_LEAD_FILLER =
+  /^(boleh|bolehkah|tolong|bantu|bantuin|bisa|coba|ya|yuk|dong|deh|dongg|nggak|gak|tidak|ga|gk|kak|bang|mas|mbak|bro|sis|aku|saya|gue|gw|kamu|lu|lo|nih|itu|ini|sih|kan|kalo|kalau|yang|untuk|tentang|soal|info|infokan|tanya|nanya|carikan|cariin|cari|search|googlein|cek|cekin|ceki|cekidot|liat|lihat|tau|tahu|kapan|siapa|berapa|dimana|di mana|kenapa|mengapa|apa|bagaimana)\b[\s,]*/i;
+
+/** Bersihkan pesan natural → query pencarian singkat. */
+function cleanSearchQuery(text: string): string {
+  let q = text.replace(/[?!.]+$/g, '').trim();
+  // trailing filler ("... nggak?", "... dong", dst.)
+  q = q.replace(/(\s+(nggak|gak|tidak|ga|gk|ya|yah|dong|deh|dongg|kak|bang|mas|mbak|bro|sis))+\.?\s*$/i, '');
+  // leading filler & question words, berulang ("boleh bantuin aku cariin kapan jadwal X nggak?")
+  let prev = '';
+  while (q !== prev) {
+    prev = q;
+    q = q.replace(SEARCH_LEAD_FILLER, '');
+  }
+  return q.trim();
+}
+
+/**
+ * Deteksi apakah user minta dicarikan info (natural language) dan kembalikan
+ * query yang bisa langsung dipakai ke google_search. Return null jika bukan
+ * intent pencarian (obrolan biasa, curhat, dll).
+ */
+function detectSearchQuery(text: string): string | null {
+  const t = (text || '').trim();
+  if (!t || t.length < 6) return null;
+  const lower = t.toLowerCase();
+
+  const hasVerb = SEARCH_VERB_RE.test(lower);
+  const hasHelp = SEARCH_HELP_RE.test(lower) && /\b(cari|cek|lihat|liat)\b/i.test(lower);
+  const hasLookup = SEARCH_LOOKUP_RE.test(lower);
+  if (!hasVerb && !hasHelp && !hasLookup) return null;
+
+  // False-positive guard: "tau gak aku beli kucing baru?" = curhat, bukan web lookup.
+  if (hasLookup && !hasVerb && !hasHelp && SELF_REF_RE.test(lower)) {
+    return null;
+  }
+
+  const q = cleanSearchQuery(t);
+  if (q.length < 3) return null;
+  return q;
 }
