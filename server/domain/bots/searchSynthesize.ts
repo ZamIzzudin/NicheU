@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { env } from '../../config/env';
-import type { SearchItem, SearchResult } from './searchTypes';
+import type { SearchItem, SearchResult, SearchPersona } from './searchTypes';
 
 function clean(s: string): string {
   return String(s || '')
@@ -129,6 +129,7 @@ export async function synthesizeSearchReply(input: {
   query: string;
   results: SearchItem[];
   engine?: string;
+  persona?: SearchPersona;
 }): Promise<string> {
   const usefulResults = pickUsefulResults(input.query, input.results, 5);
   const factPool = usefulResults.map((r) => `${r.title}. ${r.snippet || ''}`);
@@ -145,17 +146,33 @@ export async function synthesizeSearchReply(input: {
     .join('\n')
     .slice(0, 4500);
 
-  const system = `Kamu chat WhatsApp sebagai cewek Indonesia santai (pasangan).
-Tugas: jawab intisari hasil pencarian.
+  const p = input.persona;
+  const identity = p?.name
+    ? `Kamu adalah ${p.name}, berperan sebagai pasangan ${p.userName || 'pasanganmu'} di WhatsApp.`
+    : `Kamu chat WhatsApp sebagai cewek Indonesia santai (pasangan).`;
+  const styleLine = p?.speechStyle ? `Gaya bicaramu: ${p.speechStyle}.` : '';
+  const traitsLine = p?.traits?.length ? `Sifatmu: ${p.traits.join(', ')}.` : '';
 
-WAJIB:
+  const system = `${identity}
+${styleLine} ${traitsLine}
+
+GAYA CHAT (WAJIB):
+1. Multipesan: 1 ide = 1 bubble pendek, pisah pakai baris kosong, total 2-4 bubble.
+2. Natural & hangat; boleh panggilan sayang sekali saja, jangan berlebihan.
+3. Elongasi manja natural: iyaa, okii, kelarr, duluu, bangett.
+4. Slang chat Indonesia: km, gpp, ntar, yaudah. Ketawa teks (wkwk/heheh) kalau cocok.
+5. Emoji hemat (maks 1-2).
+6. DILARANG: essay AI, bahasa presentasi, list formal bernomor, "Baik saya akan...", karakter aneh ~><|\`$.
+
+TUGAS:
+Jawab intisari hasil pencarian singkat & natural, seolah kamu baru selesai googling buat pasanganmu.
+
+ATURAN ISI:
 - Jawab HANYA inti yang ditanya user (mis. tanggal rilis → sebut tanggal + 1 fakta pendukung).
-- Maksimal 2-3 bubble multipesan (baris kosong), total ≤ 280 karakter.
-- Bahasa chat, bukan report.
-- JANGAN copy-paste teks website.
-- JANGAN sebut URL, nomor list 1/2/3, Google/Bing, SerpAPI, bot, CAPTCHA, engine.
-- JANGAN kirim UI sampah (game, solitaire, moves, deals, hint, undo).
-- Kalau evidence ga nyambung / sampah: bilang gak nemu.
+- Tulis ulang dengan kata-katamu sendiri, JANGAN copy-paste teks website.
+- JANGAN sebut URL, nomor list 1/2/3, nama engine/bot (Google/Bing/SerpAPI/Camofox/CAPTCHA).
+- JANGAN kirim sampah UI (game, solitaire, moves, deals, hint, undo).
+- Kalau evidence ga nyambung / sampah: bilang gak nemu dengan nada santai.
 - Kalau tanggal konflik antar sumber: sebut yang paling masuk akal + bilang ada sumber beda.
 
 Format contoh bagus:
@@ -178,8 +195,8 @@ Tulis HANYA balasan chat final, intisari saja.`;
       url,
       {
         model: env.apiModel,
-        temperature: 0.45,
-        max_tokens: 180,
+        temperature: 0.85,
+        max_tokens: 300,
         messages: [
           { role: 'system', content: system },
           { role: 'user', content: user },
@@ -294,7 +311,8 @@ function heuristicEssenceReply(query: string, results: SearchItem[], facts: stri
 /** Humanize raw SERP results into a natural WA reply. */
 export async function humanizeSearchResult(
   raw: SearchResult,
-  log: (m: string) => void
+  log: (m: string) => void,
+  persona?: SearchPersona
 ): Promise<{ reply: string; message: string }> {
   const useful = pickUsefulResults(raw.query, raw.results || [], 5);
   if (!useful.length) {
@@ -307,6 +325,7 @@ export async function humanizeSearchResult(
     query: raw.query,
     results: useful,
     engine: raw.engine,
+    persona,
   });
 
   const safe = isAcceptableHumanReply(reply) ? reply : naturalEmpty(raw.query);

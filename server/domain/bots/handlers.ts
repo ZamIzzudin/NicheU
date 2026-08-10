@@ -146,7 +146,12 @@ register('google_search', async (params, ctx) => {
       warning,
     };
 
-    const human = await humanizeSearchResult(raw, (m) => ctx.log(m));
+    const personaArg =
+      params.persona && typeof params.persona === 'object'
+        ? (params.persona as { name?: string; userName?: string; speechStyle?: string; traits?: string[] })
+        : undefined;
+
+    const human = await humanizeSearchResult(raw, (m) => ctx.log(m), personaArg);
     message = human.message;
   } catch (error: any) {
     const err = error?.message || String(error);

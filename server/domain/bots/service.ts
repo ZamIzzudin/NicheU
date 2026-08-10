@@ -6,6 +6,11 @@ import { getBotHandler, listHandlerNames } from './handlers';
 
 export type BotNotify = (userId: string, text: string) => Promise<void>;
 
+export type BotRunFinishedCb = (
+  run: BotRun,
+  outcome: { status: BotRunStatus; text?: string }
+) => void;
+
 /**
  * Manual automation bots (not auto-generated tools).
  * - Triggered by agent via list_bots / run_bot
@@ -14,6 +19,7 @@ export type BotNotify = (userId: string, text: string) => Promise<void>;
  */
 export class BotService {
   private notify: BotNotify | null = null;
+  private onRunFinished: BotRunFinishedCb | null = null;
   private running = new Set<string>();
   private maxConcurrent = 3;
 
@@ -21,6 +27,11 @@ export class BotService {
 
   setNotify(fn: BotNotify) {
     this.notify = fn;
+  }
+
+  /** Dipanggil setiap kali run bot selesai (sukses/gagal) — untuk persist ke memory/transcript. */
+  setOnRunFinished(fn: BotRunFinishedCb) {
+    this.onRunFinished = fn;
   }
 
   async list(options: { enabledOnly?: boolean } = {}): Promise<AutomationBot[]> {
@@ -413,10 +424,6 @@ export class BotService {
   }
 
   private async notifyOutcome(run: BotRun) {
-    if (!this.notify) {
-      console.warn(`[bot] no notify callback; run ${run.id} ${run.status}`);
-      return;
-    }
     if (run.notified) return;
 
     const bot = (await this.getByName(run.botName)) || null;
@@ -461,6 +468,19 @@ export class BotService {
       .replace(/\n{3,}/g, '\n\n')
       .trim()
       .slice(0, 2800);
+
+    // Persist hasil ke transcript hari ini (sukses/gagal) supaya agent ingat
+    // pekerjaan background sudah selesai — terlepas dari status koneksi WhatsApp.
+    try {
+      this.onRunFinished?.(run, { status: run.status, text });
+    } catch (error: any) {
+      console.warn(`[bot] onRunFinished failed for ${run.id}:`, error?.message || error);
+    }
+
+    if (!this.notify) {
+      console.warn(`[bot] no notify callback; run ${run.id} ${run.status}`);
+      return;
+    }
 
     try {
       await this.notify(run.userId, text);

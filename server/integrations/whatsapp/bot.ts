@@ -987,7 +987,16 @@ export class WhatsAppBot {
             const result = await botService.enqueueRun({
               userId,
               botName: 'google_search',
-              parameters: { query: searchQuery, limit: 5 },
+              parameters: {
+                query: searchQuery,
+                limit: 5,
+                persona: {
+                  name: persona?.name,
+                  userName: persona?.userName,
+                  speechStyle: persona?.speechStyle,
+                  traits: persona?.traits,
+                },
+              },
               triggerText: text,
             });
             if (result.status === 'queued') {

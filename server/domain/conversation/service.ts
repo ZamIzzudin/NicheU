@@ -100,6 +100,28 @@ export class ConversationService {
   }
 
   /**
+   * Tambahkan pesan assistant (mis. hasil bot background / notifikasi search)
+   * ke transcript hari ini supaya agent tahu pekerjaan background sudah selesai
+   * (sukses maupun gagal), bukan terkesan masih menggantung.
+   */
+  async appendAssistantMessage(userId: string, content: string): Promise<void> {
+    const text = String(content || '').trim();
+    if (!text) return;
+    await this.ensureCurrentDay(userId);
+    const today = this.todayDate();
+    await this.db.conversations.updateOne(
+      { userId },
+      {
+        $set: { conversationDate: today, updatedAt: new Date() },
+        $push: {
+          messages: { role: 'assistant' as const, content: text.slice(0, 2000) },
+        },
+      },
+      { upsert: true }
+    );
+  }
+
+  /**
    * Persist chat turns for today. Only durable user/assistant bubbles are stored
    * (system prompts & few-shots are rebuilt each turn).
    */

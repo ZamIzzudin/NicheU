@@ -96,6 +96,19 @@ async function main() {
     await sendOutbound(userId, text);
   });
 
+  // Simpan hasil bot (mis. hasil pencarian, sukses/gagal) ke transcript hari ini
+  // supaya agent ingat pekerjaan background sudah selesai saat membaca memori hari ini.
+  botService.setOnRunFinished(async (run, outcome) => {
+    try {
+      if (run.userId && outcome.text && outcome.text.trim()) {
+        await conversationService.appendAssistantMessage(run.userId, outcome.text);
+        console.log(`🧠 Bot outcome saved to day transcript (${run.botName}:${run.status})`);
+      }
+    } catch (error) {
+      console.warn('[bot] persist run outcome failed:', (error as Error)?.message || error);
+    }
+  });
+
   // Resume any queued bot runs after restart
   botService.processQueue().catch((err) => console.warn('Bot queue resume:', err));
 

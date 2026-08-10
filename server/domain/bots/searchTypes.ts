@@ -31,3 +31,11 @@ export type SearchProviderResult = {
   answerBox?: string;
   knowledgeGraph?: string;
 };
+
+/** Info persona ringan untuk mewarnai copywriting hasil search (opsional). */
+export type SearchPersona = {
+  name?: string;
+  userName?: string;
+  speechStyle?: string;
+  traits?: string[];
+};

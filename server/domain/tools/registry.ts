@@ -300,12 +300,34 @@ export class ToolRegistry {
               'web_search sinkron sudah dinonaktifkan. Gunakan run_bot bot_name=google_search (butuh botService).',
           };
         }
+        let personaParam:
+          | { name?: string; userName?: string; speechStyle?: string; traits?: string[] }
+          | undefined;
+        if (ctx?.personaService) {
+          try {
+            const p = (await ctx.personaService.get(ctx.userId)) as
+              | { name?: string; userName?: string; speechStyle?: string; traits?: string[] }
+              | null
+              | undefined;
+            if (p) {
+              personaParam = {
+                name: p.name,
+                userName: p.userName,
+                speechStyle: p.speechStyle,
+                traits: p.traits,
+              };
+            }
+          } catch {
+            // persona optional — lanjut tanpa gaya
+          }
+        }
         const result = await ctx.botService.enqueueRun({
           userId: ctx.userId,
           botName: 'google_search',
           parameters: {
             query,
             limit: Number(args.limit || 5),
+            persona: personaParam,
           },
           triggerText: query,
         });
