@@ -54,15 +54,11 @@ async function main() {
   console.log('⏰ Reminder collection ready (ephemeral, not long-term memory)');
   console.log('🤖 Automation bots ready (manual, background + WA notify)');
   {
-    const { isSerpApiConfigured, getSerpApiKey } = await import('./config/env');
-    if (isSerpApiConfigured()) {
-      const k = getSerpApiKey();
-      console.log(`🔎 SerpAPI: configured (key …${k.slice(-4)}, engine=${env.serpApiEngine})\n`);
+    console.log(`🔎 Search provider: camofox (${env.camofoxUrl})`);
+    if (!env.camofoxAccessKey) {
+      console.warn('  ⚠ CAMOFOX_ACCESS_KEY kosong — aman di network internal, tapi set kalau camofox diproteksi.\n');
     } else {
-      console.warn(
-        '⚠ SerpAPI: SERPAPI_API_KEY not detected in process env — web_search will fail.\n' +
-          '  Dokploy: set SERPAPI_API_KEY in Environment, and compose must pass SERPAPI_API_KEY=${SERPAPI_API_KEY}\n'
-      );
+      console.log('\n');
     }
   }
 

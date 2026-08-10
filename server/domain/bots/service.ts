@@ -554,12 +554,12 @@ export class BotService {
   async ensureDemoBots(): Promise<void> {
     const count = await this.db.bots.countDocuments({});
 
-    // Always ensure google_search bot (SerpAPI → human intisari notify)
+    // Always ensure google_search bot (camofox → human intisari notify)
     await this.upsert({
       name: 'google_search',
-      title: 'Web Search (SerpAPI)',
+      title: 'Web Search (Google)',
       description:
-        'Mencari informasi di internet via SerpAPI (Google). ' +
+        'Mencari informasi di internet via Google Search. ' +
         'PAKAI otomatis saat user minta tolong dicarikan info, meski kalimatnya santai dan tidak menyebut "google" atau "bot". ' +
         'Contoh niat: "bisa cariin ... gak?", "cariin dong ...", "tolong carikan ...", "tau gak ...", ' +
         '"ada info ...", cek harga/berita/jadwal/cuaca/fakta terbaru, atau hal yang butuh data web. ' +
@@ -611,7 +611,7 @@ export class BotService {
       ],
       enabled: true,
       timeoutMs: 90 * 1000,
-      config: { defaultLimit: 5, provider: 'serpapi' },
+      config: { defaultLimit: 5, provider: 'auto' },
       ackMessageHint:
         'bisaaa\n\naku carikan duluu yaa\n\nnanti aku kabarin kalo udah ketemu',
       // Empty hints: notify uses pure humanized message from handler

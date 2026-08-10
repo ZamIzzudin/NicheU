@@ -123,7 +123,7 @@ function extractFacts(query: string, blobs: string[]): string[] {
 }
 
 /**
- * Turn SerpAPI evidence into a SHORT natural WhatsApp answer — essence only.
+ * Turn SERP evidence into a SHORT natural WhatsApp answer — essence only.
  */
 export async function synthesizeSearchReply(input: {
   query: string;
@@ -291,7 +291,7 @@ function heuristicEssenceReply(query: string, results: SearchItem[], facts: stri
   return isAcceptableHumanReply(reply) ? reply : naturalEmpty(query);
 }
 
-/** Humanize SerpAPI (or any SERP) raw results into a natural WA reply. */
+/** Humanize raw SERP results into a natural WA reply. */
 export async function humanizeSearchResult(
   raw: SearchResult,
   log: (m: string) => void

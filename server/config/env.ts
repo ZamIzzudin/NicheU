@@ -89,31 +89,12 @@ export const env = {
   whatsappAuthDir: process.env.WHATSAPP_AUTH_DIR || 'whatsapp_auth',
   /** Wait this long after last user bubble before replying (merge multipesan). */
   userBubbleDebounceSec: num('USER_BUBBLE_DEBOUNCE_SEC', 120),
-  /**
-   * Snapshot of SerpAPI key at boot (may be empty if compose omitted it).
-   * Prefer getSerpApiKey() at call-time so live process.env is always used.
-   */
-  get serpApiKey(): string {
-    return getSerpApiKey();
-  },
-  /** SerpAPI engine: google | bing | duckduckgo */
-  get serpApiEngine(): string {
-    return (trimEnv('SERPAPI_ENGINE') || 'google').toLowerCase();
-  },
+  /** Camofox browser server base URL (REST anti-detection, repo jo-inc/camofox-browser). */
+  camofoxUrl: (trimEnv('CAMOFOX_URL') || 'http://localhost:9377').replace(/\/$/, ''),
+  /** Opsional Bearer token — harus sama dengan CAMOFOX_ACCESS_KEY di server camofox. */
+  camofoxAccessKey: trimEnv('CAMOFOX_ACCESS_KEY') || '',
+  /** Timeout per-request ke camofox server (ms). */
+  camofoxTimeoutMs: num('CAMOFOX_TIMEOUT_MS', 45000),
 };
-
-/** Read SerpAPI key live from process.env (Docker/Dokploy-safe). */
-export function getSerpApiKey(): string {
-  return (
-    trimEnv('SERPAPI_API_KEY') ||
-    trimEnv('SERP_API_KEY') ||
-    trimEnv('SERPAPI_KEY') ||
-    ''
-  );
-}
-
-export function isSerpApiConfigured(): boolean {
-  return getSerpApiKey().length > 8;
-}
 
 export type AppEnv = typeof env;

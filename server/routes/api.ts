@@ -1,5 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { env, isSerpApiConfigured } from '../config/env';
+import { env } from '../config/env';
 import { Database } from '../db/mongo';
 import { ToolRegistry } from '../domain/tools/registry';
 import { MemoryService } from '../domain/memory/service';
@@ -98,10 +98,8 @@ export function createApiRouter(deps: {
         embeddingModel: env.embeddingModel,
       },
       search: {
-        provider: 'serpapi',
-        // Boolean only — never expose the key
-        configured: isSerpApiConfigured(),
-        engine: env.serpApiEngine || 'google',
+        provider: 'camofox',
+        camofoxUrl: env.camofoxUrl,
       },
       services: {
         mongodb: mongoOk ? 'connected' : 'disconnected',

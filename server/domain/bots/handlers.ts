@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { runSerpApiSearch } from '../../integrations/search/serpapi';
+import { runCamofoxSearch } from '../../integrations/search/camofox';
 import { humanizeSearchResult } from './searchSynthesize';
 import type { SearchItem, SearchResult } from './searchTypes';
 
@@ -77,45 +77,46 @@ register('demo_long_job', async (params, ctx) => {
 });
 
 /**
- * Web search via SerpAPI (background).
- * Snippets + answer box / knowledge graph → LLM rekap intisari natural multipesan.
+ * Web search via camofox (anti-detection browser, background).
+ * SERP YAML → SearchItem[] → LLM rekap intisari natural multipesan.
  * Empty results → soft "gak nemu" (not hard error / no link dump).
  */
 register('google_search', async (params, ctx) => {
   const query = String(params.query || params.q || '').trim();
   if (!query) throw new Error('query required');
   const limit = Number(params.limit || ctx.config?.defaultLimit || 5);
-  ctx.log(`google_search (serpapi) query="${query}" limit=${limit}`);
+  ctx.log(`google_search query="${query}" limit=${limit} (camofox)`);
 
   let message = '';
   let ok = false;
   let count = 0;
-  let engine: string = 'serpapi';
+  let engine = '';
   let tookMs = 0;
   let results: SearchItem[] = [];
   let warning: string | undefined;
 
   try {
-    const serp = await runSerpApiSearch({
+    const search = await runCamofoxSearch({
       query,
       limit,
       log: (m, extra) => ctx.log(m, extra),
+      userId: ctx.userId,
     });
 
-    engine = serp.engine;
-    tookMs = serp.tookMs;
-    count = serp.count;
-    ok = serp.ok;
-    warning = serp.warning;
-    results = serp.results.map((r) => ({
+    engine = search.engine;
+    tookMs = search.tookMs;
+    count = search.count;
+    ok = search.ok;
+    warning = search.warning;
+    results = search.results.map((r) => ({
       rank: r.rank,
       title: r.title,
       url: r.url,
       snippet: r.snippet,
     }));
 
-    if (serp.answerBox || serp.knowledgeGraph) {
-      const extra = [serp.answerBox, serp.knowledgeGraph].filter(Boolean).join(' | ');
+    if (search.answerBox || search.knowledgeGraph) {
+      const extra = [search.answerBox, search.knowledgeGraph].filter(Boolean).join(' | ');
       if (results[0]) {
         results[0] = {
           ...results[0],
@@ -149,13 +150,13 @@ register('google_search', async (params, ctx) => {
     message = human.message;
   } catch (error: any) {
     const err = error?.message || String(error);
-    ctx.log(`serpapi failed: ${err}`);
+    ctx.log(`search failed: ${err}`);
     warning = err;
-    if (/SERPAPI_API_KEY missing|auth failed/i.test(err)) {
+    if (/captcha|sorry|blocked/i.test(err)) {
+      message = 'waduh barusan ke-blokir sama Google 😞\n\ncoba lagi nanti yaa';
+    } else if (/ECONNREFUSED|ENOTFOUND|ETIMEDOUT|timeout|camofox/i.test(err)) {
       message =
-        'aduuh fitur carinya belum siap 😞\n\n(kunci SerpAPI belum diset di server)\n\ncoba bilang admin yaa';
-    } else if (/429|quota|rate limit/i.test(err)) {
-      message = 'waduh barusan kuota search-nya abis 😞\n\ncoba lagi nanti yaa';
+        'aduuh fitur carinya lagi bermasalah 😞\n\n(camofox server belum jalan / timeout)\n\ncoba lagi bentar yaa';
     } else {
       message = 'waduh barusan gagal nyariin 😞\n\ncoba lagi bentar yaa';
     }

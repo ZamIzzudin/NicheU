@@ -57,13 +57,10 @@ services:
       HISTORY_MAX_MESSAGES: ${HISTORY_MAX_MESSAGES:-24}
       WHATSAPP_AUTH_DIR: /app/whatsapp_auth
       ALLOW_LID_OWNER_FALLBACK: ${ALLOW_LID_OWNER_FALLBACK:-true}
-      # Web search (SerpAPI) — must be listed so Dokploy env reaches the container
-      SERPAPI_API_KEY: ${SERPAPI_API_KEY}
-      SERPAPI_ENGINE: ${SERPAPI_ENGINE:-google}
-      SERPAPI_HL: ${SERPAPI_HL:-id}
-      SERPAPI_GL: ${SERPAPI_GL:-id}
-      SERPAPI_LOCATION: ${SERPAPI_LOCATION:-}
-      SERPAPI_TIMEOUT_MS: ${SERPAPI_TIMEOUT_MS:-30000}
+      # Web search (camofox) — must be listed so Dokploy env reaches the container
+      CAMOFOX_URL: ${CAMOFOX_URL:-http://camofox:9377}
+      CAMOFOX_ACCESS_KEY: ${CAMOFOX_ACCESS_KEY:-}
+      CAMOFOX_TIMEOUT_MS: ${CAMOFOX_TIMEOUT_MS:-45000}
     volumes:
       - niche_wa_auth:/app/whatsapp_auth
     healthcheck:
@@ -79,6 +76,34 @@ services:
       retries: 5
       start_period: 90s
 
+  # Camoufox anti-detection browser server (web search tanpa quota / captcha block)
+  # Image resmi: ghcr.io/jo-inc/camofox-browser (multi-arch amd64/arm64)
+  camofox:
+    image: ghcr.io/jo-inc/camofox-browser:latest
+    restart: unless-stopped
+    # Tidak dipublish ke publik; hanya dipakai niche-daily via Docker network internal.
+    # Kalau mau debug dari host: uncomment baris ports di bawah.
+    # ports:
+    #   - "9377:9377"
+    environment:
+      CAMOFOX_PORT: 9377
+      CAMOFOX_BIND_HOST: 0.0.0.0
+      CAMOFOX_ACCESS_KEY: ${CAMOFOX_ACCESS_KEY:-}
+      CAMOFOX_CRASH_REPORT_ENABLED: ${CAMOFOX_CRASH_REPORT_ENABLED:-false}
+      BROWSER_IDLE_TIMEOUT_MS: 300000
+      SESSION_TIMEOUT_MS: 1800000
+      MAX_OLD_SPACE_SIZE: 128
+    volumes:
+      # Persist session/cookie browser supaya tidak re-login tiap restart
+      - camofox_profiles:/root/.camofox
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:9377/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
 volumes:
   niche_mongo_data:
   niche_wa_auth:
+  camofox_profiles:
