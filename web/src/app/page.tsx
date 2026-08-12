@@ -10,10 +10,12 @@ import {
   DailyMood,
   MoodLabel,
   MoodSnapshot,
+  Memory,
+  MemoryCategory,
 } from '../../../shared/types';
 import WhatsAppStatus from '../components/WhatsAppStatus';
 
-type Tab = 'whatsapp' | 'persona' | 'mood' | 'schedule' | 'tools';
+type Tab = 'whatsapp' | 'persona' | 'mood' | 'schedule' | 'memori' | 'tools';
 
 const MOOD_LABELS: MoodLabel[] = [
   'ceria',
@@ -43,6 +45,7 @@ export default function Home() {
     { id: 'persona', label: 'Persona' },
     { id: 'mood', label: 'Mood' },
     { id: 'schedule', label: 'Jadwal' },
+    { id: 'memori', label: 'Memori' },
     { id: 'tools', label: 'Tools' },
   ];
 
@@ -91,6 +94,7 @@ export default function Home() {
         {tab === 'persona' && <PersonaPanel />}
         {tab === 'mood' && <MoodPanel />}
         {tab === 'schedule' && <SchedulePanel />}
+        {tab === 'memori' && <MemoryPanel />}
         {tab === 'tools' && <ToolsPanel />}
       </div>
 
@@ -443,6 +447,214 @@ function SchedulePanel() {
         <pre className="max-h-80 overflow-auto whitespace-pre-wrap rounded-md bg-cream p-4 text-xs text-ink-soft">
           {context}
         </pre>
+      </Card>
+    </div>
+  );
+}
+
+/* ============================== MEMORI ============================== */
+
+const CATEGORY_LABEL: Record<MemoryCategory, string> = {
+  preference: 'Preferensi',
+  fact: 'Fakta',
+  event: 'Event',
+  relationship: 'Relasi',
+  task: 'Tugas',
+  goal: 'Tujuan',
+};
+
+function importancePill(importance: number): string {
+  if (importance >= 0.85) return 'bg-coral-pale text-coral';
+  if (importance >= 0.7) return 'bg-mustard-pale text-[#8A5B0E]';
+  return 'bg-sage-pale text-sage-deep';
+}
+
+function MemoryPanel() {
+  const [memories, setMemories] = useState<Memory[]>([]);
+  const [stats, setStats] = useState<{
+    total: number;
+    highImportance: number;
+    byCategory: Record<MemoryCategory, number>;
+  } | null>(null);
+  const [recaps, setRecaps] = useState<
+    Array<{
+      date: string;
+      storedMemories: number;
+      hygiene?: { removed: number; merged: number; clusters: number };
+      at?: string;
+    }>
+  >([]);
+  const [day, setDay] = useState<{
+    previousDaySummary?: string | null;
+    daySummary?: string | null;
+    lastConsolidatedDate?: string | null;
+    messageCount?: number;
+  } | null>(null);
+  const [query, setQuery] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [hygiening, setHygiening] = useState(false);
+
+  const load = async (q: string) => {
+    setLoading(true);
+    try {
+      const [memRes, statsRes, recapRes, dayRes] = await Promise.all([
+        axios.get('/api/memories', { params: { query: q.trim() || undefined, limit: 50 } }),
+        axios.get('/api/memories/stats'),
+        axios.get('/api/memories/consolidations'),
+        axios.get('/api/conversation/day'),
+      ]);
+      setMemories(memRes.data.memories || []);
+      setStats(statsRes.data);
+      setRecaps(recapRes.data.recaps || []);
+      setDay(dayRes.data);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    const t = setTimeout(() => load(query), 350);
+    return () => clearTimeout(t);
+  }, [query]);
+
+  const runHygiene = async () => {
+    setHygiening(true);
+    try {
+      await axios.post('/api/memories/hygiene');
+      await load(query);
+    } catch (e: any) {
+      alert(e?.response?.data?.error || 'Gagal menjalankan hygiene');
+    } finally {
+      setHygiening(false);
+    }
+  };
+
+  const topCategory = stats
+    ? (Object.entries(stats.byCategory || {}).sort((a, b) => b[1] - a[1])[0] as [MemoryCategory, number])
+    : undefined;
+
+  return (
+    <div className="space-y-6">
+      {/* Statistik */}
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <StatCard tone="brown" label="Total Memori" value={stats?.total || 0} />
+        <StatCard tone="sage" label="Importance ≥ 0.7" value={stats?.highImportance || 0} />
+        <StatCard
+          tone="mustard"
+          label={topCategory ? `Kategori: ${CATEGORY_LABEL[topCategory[0]]}` : 'Kategori'}
+          value={topCategory?.[1] || 0}
+        />
+      </div>
+
+      {/* Recap harian */}
+      <Card>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <h3 className="font-display text-xl font-bold text-brown">Recap Harian Memory</h3>
+          <button
+            onClick={runHygiene}
+            disabled={hygiening}
+            className="btn btn-secondary !px-5 !py-2 text-sm disabled:opacity-50"
+          >
+            {hygiening ? 'Running...' : 'Jalankan Hygiene'}
+          </button>
+        </div>
+
+        {day?.previousDaySummary ? (
+          <div className="mb-4 rounded-md bg-sage-pale/60 px-4 py-3">
+            <div className="text-[11px] font-semibold uppercase tracking-widest text-sage-deep">
+              Ringkasan kemarin (setelah tidur)
+            </div>
+            <p className="mt-1 text-sm text-ink">{day.previousDaySummary}</p>
+          </div>
+        ) : null}
+        {day?.daySummary ? (
+          <div className="mb-4 rounded-md bg-cream-deep/60 px-4 py-3">
+            <div className="text-[11px] font-semibold uppercase tracking-widest text-ink-soft">
+              Ringkasan hari ini
+            </div>
+            <p className="mt-1 text-sm text-ink">{day.daySummary}</p>
+          </div>
+        ) : null}
+
+        {recaps.length ? (
+          <div className="space-y-2">
+            {recaps.map((r) => (
+              <div
+                key={r.date}
+                className="flex flex-wrap items-center gap-2 rounded-md bg-cream px-4 py-2.5"
+              >
+                <span className="pill-tag bg-brown text-cream">{r.date}</span>
+                <span className="pill-tag bg-sage-pale text-sage-deep">
+                  +{r.storedMemories} memori
+                </span>
+                {r.hygiene ? (
+                  <span className="pill-tag bg-mustard-pale text-[#8A5B0E]">
+                    hygiene: −{r.hygiene.removed} duplikat, {r.hygiene.merged} merge
+                  </span>
+                ) : null}
+                <span className="ml-auto text-xs text-ink-soft">
+                  {r.at ? new Date(r.at).toLocaleString() : ''}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-ink-soft">Belum ada konsolidasi malam.</p>
+        )}
+      </Card>
+
+      {/* Daftar memori */}
+      <Card>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <h3 className="font-display text-xl font-bold text-brown">
+            {query.trim() ? `Hasil pencarian: "${query.trim()}"` : 'Memori tersimpan'}
+          </h3>
+          <div className="relative">
+            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-soft">
+              🔍
+            </span>
+            <input
+              className="w-56 rounded-pill border border-ink/15 bg-paper py-2 pl-9 pr-3 text-sm text-ink placeholder:text-ink-soft/70 focus:border-sage focus:outline-none"
+              placeholder="Cari memori..."
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </div>
+        </div>
+
+        {loading ? (
+          <p className="text-sm text-ink-soft">Loading...</p>
+        ) : memories.length === 0 ? (
+          <p className="text-sm text-ink-soft">Tidak ada memori{query.trim() ? ' yang cocok' : ''}.</p>
+        ) : (
+          <div className="space-y-2">
+            {memories.map((m) => (
+              <div
+                key={String(m._id || m.content + m.createdAt)}
+                className="rounded-md bg-cream px-4 py-3"
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="pill-tag bg-paper text-brown-soft">
+                    {CATEGORY_LABEL[m.category] || m.category}
+                  </span>
+                  <span className={`pill-tag ${importancePill(m.importance)}`}>
+                    imp {m.importance.toFixed(2)}
+                  </span>
+                  <span className="ml-auto text-xs text-ink-soft">
+                    {new Date(m.createdAt).toLocaleString()}
+                    {m.accessCount > 0 ? ` · akses ${m.accessCount}x` : ''}
+                  </span>
+                </div>
+                <p className="mt-1.5 text-sm text-ink">{m.content}</p>
+                {m.metadata?.source ? (
+                  <p className="mt-1 text-[11px] text-ink-soft">source: {String(m.metadata.source)}</p>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        )}
       </Card>
     </div>
   );

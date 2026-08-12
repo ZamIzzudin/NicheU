@@ -301,8 +301,11 @@ export function createApiRouter(deps: {
     try {
       const uid = (req.query.userId as string) || userId();
       const query = (req.query.query as string) || '';
-      const limit = req.query.limit ? parseInt(String(req.query.limit), 10) : 10;
-      const memories = await memoryService.search(uid, query, limit);
+      const limit = req.query.limit ? parseInt(String(req.query.limit), 10) : 50;
+      const safeLimit = Math.min(100, Math.max(1, limit));
+      const memories = query.trim()
+        ? await memoryService.search(uid, query, safeLimit)
+        : await memoryService.recent(uid, safeLimit);
       res.json({ memories });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -314,6 +317,33 @@ export function createApiRouter(deps: {
       const uid = (req.query.userId as string) || userId();
       const stats = await memoryService.stats(uid);
       res.json(stats);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Recap konsolidasi memori malam ("tidur") per tanggal
+  router.get('/memories/consolidations', async (_req, res) => {
+    try {
+      const uid = userId();
+      const rows = await db.meta
+        .find({ _id: { $regex: `^nightly_consolidate:${uid}:` } } as any)
+        .sort({ _id: -1 })
+        .limit(30)
+        .toArray();
+      const recaps = rows.map((r: any) => ({
+        date: String(r._id).split(':').pop(),
+        storedMemories: Number(r.value?.storedMemories) || 0,
+        hygiene: r.value?.hygiene
+          ? {
+              removed: Number(r.value.hygiene.removed) || 0,
+              merged: Number(r.value.hygiene.merged) || 0,
+              clusters: Number(r.value.hygiene.clusters) || 0,
+            }
+          : undefined,
+        at: r.value?.at ? new Date(r.value.at) : r.updatedAt,
+      }));
+      res.json({ recaps });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
