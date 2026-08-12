@@ -95,6 +95,12 @@ export const env = {
   camofoxAccessKey: trimEnv('CAMOFOX_ACCESS_KEY') || '',
   /** Timeout per-request ke camofox server (ms). */
   camofoxTimeoutMs: num('CAMOFOX_TIMEOUT_MS', 45000),
+  /** Pahami dokumen (PDF/DOCX/TXT) yang dikirim user via WhatsApp. */
+  enableDocumentUnderstanding: bool('ENABLE_DOCUMENT_UNDERSTANDING', true),
+  /** Max bytes dokumen yang boleh didownload/diproses (default 20MB). */
+  maxDocumentBytes: num('MAX_DOCUMENT_BYTES', 20 * 1024 * 1024),
+  /** Max karakter teks dokumen yang masuk ke konteks agent (default 15rb). */
+  documentMaxChars: num('DOCUMENT_MAX_CHARS', 15000),
 };
 
 export type AppEnv = typeof env;

@@ -600,6 +600,20 @@ Rules:
     return results;
   }
 
+  /**
+   * Ambil memori teratas (penting dulu, lalu terbaru) — untuk konteks proaktif / ringan
+   * yang tidak punya query spesifik.
+   */
+  async recent(userId: string, limit = 5): Promise<Memory[]> {
+    const results = await this.db.memories
+      .find({ userId })
+      .sort({ importance: -1, updatedAt: -1, createdAt: -1 })
+      .limit(Math.min(20, Math.max(1, limit)))
+      .toArray();
+    await this.touch(results);
+    return results;
+  }
+
   async stats(userId: string) {
     const total = await this.db.memories.countDocuments({ userId });
     const categories: MemoryCategory[] = [

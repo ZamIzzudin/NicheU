@@ -23,6 +23,7 @@ import { ProactiveService } from '../../domain/proactive/service';
 import { MoodService } from '../../domain/mood/service';
 import { ReminderService } from '../../domain/reminder/service';
 import { env } from '../../config/env';
+import { extractDocumentText } from '../../utils/documents';
 import { buildClockContext } from '../../utils/time';
 
 export type WaConnectionStatus =
@@ -62,6 +63,7 @@ export class WhatsAppBot {
     {
       texts: string[];
       imageContexts: string[];
+      documentContexts: string[];
       replyJid: string;
       timer: NodeJS.Timeout;
       lastAt: number;
@@ -414,14 +416,16 @@ export class WhatsAppBot {
           const replyJid = from; // reply on same chat jid (may be @lid)
           const text = this.extractText(message);
           const imageContext = await this.extractImageContext(message);
+          const documentContext = await this.extractDocumentContext(message);
 
-          // Skip empty events (no text and no image we could describe)
-          if (!text && !imageContext) continue;
+          // Skip empty events (no text, no image, no document we could read)
+          if (!text && !imageContext && !documentContext) continue;
 
           this.lastUserMessageAt = Date.now();
           this.enqueueUserBubble(userId, replyJid, {
             text: text || undefined,
             imageContext: imageContext || undefined,
+            documentContext: documentContext || undefined,
           });
         }
       });
@@ -505,6 +509,92 @@ export class WhatsAppBot {
     );
   }
 
+  private hasDocumentMessage(message: any): boolean {
+    return Boolean(
+      message.message?.documentMessage ||
+        message.message?.documentWithCaptionMessage?.message?.documentMessage ||
+        message.message?.ephemeralMessage?.message?.documentMessage ||
+        message.message?.ephemeralMessage?.message?.documentWithCaptionMessage?.message
+          ?.documentMessage
+    );
+  }
+
+  private getDocumentMeta(message: any): { fileName?: string; mime?: string; fileLength?: number } | null {
+    const doc =
+      message.message?.documentMessage ||
+      message.message?.documentWithCaptionMessage?.message?.documentMessage ||
+      message.message?.ephemeralMessage?.message?.documentMessage ||
+      message.message?.ephemeralMessage?.message?.documentWithCaptionMessage?.message
+        ?.documentMessage ||
+      null;
+    if (!doc) return null;
+    return {
+      fileName: typeof doc.fileName === 'string' ? doc.fileName : doc.title || undefined,
+      mime: typeof doc.mimetype === 'string' ? doc.mimetype : undefined,
+      fileLength: Number(doc.fileLength) || 0,
+    };
+  }
+
+  /**
+   * Download dokumen (PDF/DOCX/TXT) dan ekstrak teksnya.
+   * Hasilnya berupa blok konteks untuk agent, sama seperti deskripsi gambar.
+   */
+  private async extractDocumentContext(message: any): Promise<string | null> {
+    if (!env.enableDocumentUnderstanding) return null;
+    if (!this.hasDocumentMessage(message)) return null;
+    if (!this.socket) return null;
+
+    const meta = this.getDocumentMeta(message);
+    if (!meta) return null;
+    const fileName = meta.fileName || 'dokumen';
+
+    // Quick size guard sebelum download
+    if ((meta.fileLength || 0) > 0 && (meta.fileLength || 0) > env.maxDocumentBytes) {
+      return `[User mengirim dokumen ${fileName} (${Math.round((meta.fileLength || 0) / 1024 / 1024)}MB) — terlalu besar untuk diproses.]`;
+    }
+
+    try {
+      console.log(`📄 Downloading document "${fileName}" (${meta.mime || '?'})...`);
+      const buffer = (await downloadMediaMessage(
+        message,
+        'buffer',
+        {},
+        {
+          logger: this.logger,
+          reuploadRequest: this.socket.updateMediaMessage.bind(this.socket),
+        }
+      )) as Buffer;
+
+      if (!buffer?.length) {
+        console.warn('Document download empty');
+        return `[User mengirim dokumen ${fileName}, tapi gagal diunduh.]`;
+      }
+      if (buffer.length > env.maxDocumentBytes) {
+        console.warn(`Document too large: ${buffer.length} bytes`);
+        return `[Dokumen terlalu besar untuk diproses (${Math.round(buffer.length / 1024 / 1024)}MB).]`;
+      }
+
+      const result = await extractDocumentText(buffer, {
+        mime: meta.mime,
+        filename: fileName,
+      });
+      if (result.error) {
+        console.warn(`Document parse error: ${result.error}`);
+        return `[User mengirim dokumen ${fileName}, tapi gagal dibaca: ${result.error}]`;
+      }
+      if (!result.text.trim()) {
+        return `[User mengirim dokumen ${fileName} (tanpa teks — kemungkinan hasil scan gambar).]`;
+      }
+      console.log(
+        `✓ Document parsed (${result.kind}${result.pages ? `, ${result.pages} halaman` : ''}, ${result.text.length} chars)`
+      );
+      return `[Dokumen yang user kirim: ${fileName}\n${result.text}]`;
+    } catch (error: any) {
+      console.warn('Document understand failed:', error?.message || error);
+      return `[User mengirim dokumen ${fileName}, tapi aku gagal membacanya.]`;
+    }
+  }
+
   /**
    * Download WhatsApp image and describe it via vision model.
    * Result is plain text context merged into the chat prompt.
@@ -566,17 +656,19 @@ export class WhatsAppBot {
   private enqueueUserBubble(
     userId: string,
     replyJid: string,
-    payload: { text?: string; imageContext?: string }
+    payload: { text?: string; imageContext?: string; documentContext?: string }
   ) {
     const waitMs = Math.max(5, env.userBubbleDebounceSec) * 1000;
     const text = payload.text?.trim() || '';
     const imageContext = payload.imageContext?.trim() || '';
+    const documentContext = payload.documentContext?.trim() || '';
     const existing = this.pendingBubbles.get(userId);
 
     if (existing) {
       clearTimeout(existing.timer);
       if (text) existing.texts.push(text);
       if (imageContext) existing.imageContexts.push(imageContext);
+      if (documentContext) existing.documentContexts.push(documentContext);
       existing.replyJid = replyJid;
       existing.lastAt = Date.now();
       existing.timer = setTimeout(() => {
@@ -585,7 +677,7 @@ export class WhatsAppBot {
         );
       }, waitMs);
       console.log(
-        `⏳ Bubble buffered (text=${existing.texts.length}, img=${existing.imageContexts.length}) from ${userId}; wait ${env.userBubbleDebounceSec}s`
+        `⏳ Bubble buffered (text=${existing.texts.length}, img=${existing.imageContexts.length}, doc=${existing.documentContexts.length}) from ${userId}; wait ${env.userBubbleDebounceSec}s`
       );
       return;
     }
@@ -599,12 +691,13 @@ export class WhatsAppBot {
     this.pendingBubbles.set(userId, {
       texts: text ? [text] : [],
       imageContexts: imageContext ? [imageContext] : [],
+      documentContexts: documentContext ? [documentContext] : [],
       replyJid,
       timer,
       lastAt: Date.now(),
     });
     console.log(
-      `⏳ First bubble from ${userId}${imageContext ? ' (+image)' : ''}; wait ${env.userBubbleDebounceSec}s for more...`
+      `⏳ First bubble from ${userId}${imageContext ? ' (+image)' : ''}${documentContext ? ' (+document)' : ''}; wait ${env.userBubbleDebounceSec}s for more...`
     );
 
     // Soft presence while waiting (best effort)
@@ -614,27 +707,42 @@ export class WhatsAppBot {
   private mergeBubblePayload(pending: {
     texts: string[];
     imageContexts: string[];
+    documentContexts: string[];
   }): string {
     const textPart = pending.texts.map((t) => t.trim()).filter(Boolean).join('\n');
     const imageParts = pending.imageContexts.map((d) => d.trim()).filter(Boolean);
+    const docParts = pending.documentContexts.map((d) => d.trim()).filter(Boolean);
 
-    if (!imageParts.length) return textPart;
+    const blocks: string[] = [];
+    if (textPart) blocks.push(textPart);
 
-    const imageBlock = imageParts
-      .map((desc, i) => {
-        const n = imageParts.length > 1 ? ` ${i + 1}` : '';
-        return `[Foto${n} yang user kirim]\n${desc}`;
-      })
-      .join('\n\n');
-
-    if (!textPart) {
-      return (
-        `${imageBlock}\n\n` +
-        '(User mengirim foto di atas. Balas natural seperti chat WhatsApp, tanggapi isi fotonya.)'
+    if (docParts.length) {
+      const docBlock = docParts
+        .map((d, i) => {
+          const n = docParts.length > 1 ? ` ${i + 1}` : '';
+          return `[Dokumen${n} yang user kirim]\n${d}`;
+        })
+        .join('\n\n');
+      blocks.push(
+        docBlock +
+          '\n\n(Isi dokumen di atas. Baca dan jawab berdasarkan isinya; sebut fakta pentingnya; jangan mengarang detail yang tidak ada.)'
       );
     }
 
-    return `${textPart}\n\n${imageBlock}`;
+    if (imageParts.length) {
+      const imageBlock = imageParts
+        .map((desc, i) => {
+          const n = imageParts.length > 1 ? ` ${i + 1}` : '';
+          return `[Foto${n} yang user kirim]\n${desc}`;
+        })
+        .join('\n\n');
+      blocks.push(
+        imageBlock +
+          '\n\n(User mengirim foto di atas. Balas natural seperti chat WhatsApp, tanggapi isi fotonya.)'
+      );
+    }
+
+    return blocks.join('\n\n');
   }
 
   private async flushUserBubbles(userId: string) {
@@ -663,7 +771,7 @@ export class WhatsAppBot {
       await this.proactiveService.suppressWhileUserActive(userId, 25);
 
       console.log(
-        `\n📩 ${userId} (${pending.texts.length} text, ${pending.imageContexts.length} image merged):\n${merged.slice(0, 500)}`
+        `\n📩 ${userId} (${pending.texts.length} text, ${pending.imageContexts.length} image, ${pending.documentContexts.length} doc merged):\n${merged.slice(0, 500)}`
       );
       await this.processMessage(replyJid, userId, merged);
     } catch (error) {

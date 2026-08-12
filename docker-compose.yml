@@ -61,6 +61,10 @@ services:
       CAMOFOX_URL: ${CAMOFOX_URL:-http://camofox:9377}
       CAMOFOX_ACCESS_KEY: ${CAMOFOX_ACCESS_KEY:-}
       CAMOFOX_TIMEOUT_MS: ${CAMOFOX_TIMEOUT_MS:-45000}
+      # Dokumen via WhatsApp (PDF/DOCX/TXT)
+      ENABLE_DOCUMENT_UNDERSTANDING: ${ENABLE_DOCUMENT_UNDERSTANDING:-true}
+      MAX_DOCUMENT_BYTES: ${MAX_DOCUMENT_BYTES:-20971520}
+      DOCUMENT_MAX_CHARS: ${DOCUMENT_MAX_CHARS:-15000}
     volumes:
       - niche_wa_auth:/app/whatsapp_auth
     healthcheck:

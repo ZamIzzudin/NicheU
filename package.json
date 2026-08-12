@@ -31,7 +31,9 @@
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
+    "mammoth": "^1.12.1",
     "mongodb": "^6.12.0",
+    "pdf-parse": "^2.4.5",
     "pino": "^9.6.0",
     "qrcode-terminal": "^0.12.0"
   },

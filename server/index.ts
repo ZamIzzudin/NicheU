@@ -45,7 +45,14 @@ async function main() {
   const reminderService = new ReminderService(db, client);
   const botService = new BotService(db);
   await botService.ensureDemoBots();
-  const proactiveService = new ProactiveService(db, client, scheduleService, moodService);
+  const proactiveService = new ProactiveService(
+    db,
+    client,
+    scheduleService,
+    moodService,
+    conversationService,
+    memoryService
+  );
   await proactiveService.init();
   console.log('✓ Proactive service ready\n');
   console.log(

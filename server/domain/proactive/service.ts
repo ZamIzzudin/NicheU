@@ -5,6 +5,8 @@ import { env } from '../../config/env';
 import { buildClockContext, isWithinQuietHours } from '../../utils/time';
 import { ScheduleService } from '../schedule/service';
 import { MoodService } from '../mood/service';
+import { ConversationService } from '../conversation/service';
+import { MemoryService } from '../memory/service';
 
 export type OutboundSender = (userId: string, text: string) => Promise<void>;
 
@@ -18,7 +20,9 @@ export class ProactiveService {
     private db: Database,
     private client: Client,
     private scheduleService: ScheduleService,
-    private moodService?: MoodService
+    private moodService?: MoodService,
+    private conversationService?: ConversationService,
+    private memoryService?: MemoryService
   ) {}
 
   async init(): Promise<void> {
@@ -178,7 +182,65 @@ export class ProactiveService {
 
     const clock = buildClockContext();
 
-    const system = `Kamu menulis pesan WhatsApp proaktif singkat (1-3 bubble dipisah baris kosong) sebagai Nisa.
+    // ===== Konteks tambahan: percakapan hari ini + memori + pesan proaktif terkirim =====
+    // Tujuan: jangan menanyakan hal yang sudah dibahas/diketahui user hari ini.
+    let conversationContext = '';
+    let memoryContext = '';
+    let sentProactiveContext = '';
+
+    try {
+      if (this.conversationService) {
+        const day = await this.conversationService.getDayContext(userId);
+        const bubbles = day.messages
+          .filter((m: any) => m.role === 'user' || m.role === 'assistant')
+          .slice(-8)
+          .map((m: any) => {
+            const c =
+              typeof m.content === 'string'
+                ? m.content
+                : Array.isArray(m.content)
+                  ? m.content
+                      .map((p: any) => (typeof p === 'string' ? p : p?.text || ''))
+                      .join(' ')
+                  : String(m.content ?? '');
+            return `${m.role}: ${c}`;
+          })
+          .filter((s: string) => s.trim().length > 4);
+        const parts: string[] = [];
+        if (day.previousDaySummary) parts.push(`Ringkasan kemarin: ${day.previousDaySummary}`);
+        if (day.daySummary) parts.push(`Ringkasan hari ini: ${day.daySummary}`);
+        if (bubbles.length) parts.push(`Percakapan terakhir:\n${bubbles.join('\n')}`);
+        conversationContext = parts.join('\n\n');
+      }
+    } catch (error: any) {
+      console.warn('Proactive conversation context failed:', error?.message || error);
+    }
+
+    try {
+      if (this.memoryService) {
+        const mems = await this.memoryService.recent(userId, 5);
+        memoryContext = this.memoryService.formatContext(mems);
+      }
+    } catch (error: any) {
+      console.warn('Proactive memory context failed:', error?.message || error);
+    }
+
+    try {
+      const sent = await this.db.proactive
+        .find({ userId, status: 'sent' })
+        .sort({ sentAt: -1 })
+        .limit(8)
+        .toArray();
+      if (sent.length) {
+        sentProactiveContext = sent
+          .map((s) => `${s.type}: ${s.payload?.textHint || ''}`)
+          .join('\n');
+      }
+    } catch {
+      // ignore
+    }
+
+    const system = `Kamu menulis pesan WhatsApp proaktif singkat (1-3 bubble dipisah baris kosong) sebagai ${persona?.name || 'Nisa'}.
 WAJIB gaya chat harian:
 - multipesan pendek, manja, natural
 - "sayang/sayangg"
@@ -188,7 +250,14 @@ WAJIB gaya chat harian:
 Warnai tone dari mood, tapi jangan rusak gaya chat.
 WAJIB patuhi waktu: sekarang ${clock.periodLabel} jam ${clock.time}.
 JANGAN menyapa dengan periode yang salah (contoh dilarang: ${clock.antiPatterns.join(', ') || '-'}).
-${clock.behaviorHint}`;
+${clock.behaviorHint}
+
+PENTING — BACA KONTEKS DULU:
+1. Baca "Konteks percakapan" dan "Memori penting" di bawah sebelum menulis.
+2. JANGAN menanyakan hal yang sudah terjawab / sudah dibahas hari ini (mis. user sudah bilang "udah pulang" — jangan tanya "udah pulang belum?").
+3. Kalau topik event ini sudah disinggung user, sambungkan saja secara natural (mis. "tadi katanya udah sampe rumah, gimana?"); jangan tanya ulang.
+4. Perhatikan "Pesan proaktif terkirim baru-baru ini" — JANGAN ulangi pertanyaan/topik yang sama persis.
+5. Kalau konteks tidak punya info terkait, baru tanya yang wajar dan variatif.`;
 
     const user = `${clock.promptBlock}
 
@@ -199,6 +268,9 @@ Persona: ${persona ? `${persona.name}, traits=${persona.traits.join(',')}` : 'pa
 ${moodContext ? `Mood:\n${moodContext}\n` : ''}
 Jadwal hari ini:
 ${scheduleContext}
+${conversationContext ? `\nKonteks percakapan:\n${conversationContext}\n` : ''}
+${memoryContext ? `\nMemori penting:\n${memoryContext}\n` : ''}
+${sentProactiveContext ? `\nPesan proaktif terkirim baru-baru ini:\n${sentProactiveContext}\n` : ''}
 `;
 
     try {
