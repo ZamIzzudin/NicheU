@@ -28,6 +28,13 @@ const MOOD_LABELS: MoodLabel[] = [
   'kesal',
 ];
 
+const STATUS_STYLE: Record<string, string> = {
+  planned: 'bg-sage-pale text-sage-deep',
+  ongoing: 'bg-coral-pale text-coral',
+  done: 'bg-mustard-pale text-[#8A5B0E]',
+  skipped: 'bg-cream-deep text-ink-soft',
+};
+
 export default function Home() {
   const [tab, setTab] = useState<Tab>('whatsapp');
 
@@ -40,24 +47,39 @@ export default function Home() {
   ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
-      <div className="container mx-auto px-4 py-8 max-w-6xl">
-        <div className="mb-8">
-          <h1 className="text-4xl font-bold text-gray-900 mb-2">Niche Daily</h1>
-          <p className="text-gray-600">
-            Partner agent WhatsApp dengan kepribadian, mood harian, jadwal, memory, dan self-tools
+    <main className="min-h-screen">
+      {/* HERO */}
+      <header className="relative overflow-hidden px-5 pb-10 pt-12 md:px-8">
+        <div
+          className="pointer-events-none absolute inset-0"
+          style={{
+            background:
+              'radial-gradient(circle at 85% 10%, #FBE7B8 0%, transparent 45%), radial-gradient(circle at 8% 85%, #D9E4C6 0%, transparent 45%)',
+          }}
+        />
+        <div className="relative mx-auto max-w-6xl">
+          <span className="eyebrow">● Niche Daily</span>
+          <h1 className="mt-3 font-display text-4xl font-extrabold leading-[1.05] tracking-tight text-brown md:text-6xl">
+            Partner agent <span className="text-coral">WhatsApp</span> kamu
+          </h1>
+          <p className="mt-4 max-w-xl text-ink-soft">
+            Kepribadian, mood harian, jadwal, memory, dan pencarian web — semua hidup dalam satu bot
+            WhatsApp.
           </p>
         </div>
+      </header>
 
-        <div className="mb-6 flex gap-2 flex-wrap">
+      {/* TABS */}
+      <div className="mx-auto max-w-6xl px-5 md:px-8">
+        <div className="mb-8 flex flex-wrap gap-2">
           {tabs.map((t) => (
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
-              className={`px-4 py-2 rounded-full transition-all ${
+              className={`rounded-pill px-5 py-2.5 text-sm font-semibold transition-all ${
                 tab === t.id
-                  ? 'bg-blue-600 text-white shadow-lg'
-                  : 'bg-white text-gray-700 hover:bg-gray-50'
+                  ? 'bg-brown text-cream shadow-soft-sm'
+                  : 'border border-ink/10 bg-paper text-brown hover:bg-cream-deep'
               }`}
             >
               {t.label}
@@ -71,9 +93,15 @@ export default function Home() {
         {tab === 'schedule' && <SchedulePanel />}
         {tab === 'tools' && <ToolsPanel />}
       </div>
-    </div>
+
+      <footer className="px-8 pb-16 pt-10 text-center text-[13px] text-ink-soft">
+        Niche Daily — Serene Design
+      </footer>
+    </main>
   );
 }
+
+/* ============================== MOOD ============================== */
 
 function MoodPanel() {
   const [mood, setMood] = useState<DailyMood | null>(null);
@@ -144,15 +172,11 @@ function MoodPanel() {
   if (!mood) {
     return (
       <Card>
-        <h2 className="text-xl font-bold mb-2">Belum ada mood</h2>
-        <p className="text-gray-600 mb-4">
+        <h2 className="mb-2 font-display text-2xl font-bold text-brown">Belum ada mood</h2>
+        <p className="mb-4 text-ink-soft">
           Mood digenerate setelah onboarding persona, atau tekan regenerate di bawah.
         </p>
-        <button
-          onClick={regenerate}
-          disabled={saving}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg disabled:opacity-50"
-        >
+        <button onClick={regenerate} disabled={saving} className="btn btn-accent disabled:opacity-50">
           Generate mood hari ini
         </button>
       </Card>
@@ -162,42 +186,38 @@ function MoodPanel() {
   const c: MoodSnapshot = mood.current;
 
   return (
-    <div className="space-y-4">
-      <div
-        className="rounded-2xl shadow-lg p-6 text-white"
-        style={{
-          background: `linear-gradient(135deg, ${c.color} 0%, ${shade(c.color, -25)} 100%)`,
-        }}
-      >
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <p className="text-sm/none opacity-90 mb-2">Mood hari ini · {mood.date}</p>
-            <h2 className="text-3xl font-bold capitalize">
-              {c.emoji} {c.label}
-            </h2>
-            <p className="mt-2 max-w-2xl opacity-95">{c.note}</p>
-          </div>
-          <div
-            className="w-16 h-16 rounded-full border-4 border-white/40 shadow-inner"
-            style={{ backgroundColor: c.color }}
-            title={c.color}
-          />
+    <div className="space-y-6">
+      {/* Mood utama */}
+      <div className="card-xl flex flex-col items-center gap-6 p-6 md:flex-row">
+        <div
+          className="flex h-28 w-28 shrink-0 items-center justify-center rounded-full text-6xl shadow-soft-sm"
+          style={{ backgroundColor: c.color }}
+        >
+          {c.emoji}
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-6">
-          <Metric label="Warna" value={c.color} />
-          <Metric label="Valence" value={c.valence.toFixed(2)} />
-          <Metric label="Energy" value={c.energy.toFixed(2)} />
-          <Metric label="Speech" value={c.speechHint.slice(0, 42) + (c.speechHint.length > 42 ? '…' : '')} />
+        <div className="flex-1 text-center md:text-left">
+          <p className="text-xs uppercase tracking-widest text-ink-soft">Mood hari ini · {mood.date}</p>
+          <h2 className="mt-1 font-display text-4xl font-bold capitalize text-brown">
+            {c.label}
+          </h2>
+          <p className="mt-1 max-w-2xl text-ink-soft">{c.note}</p>
+          <p className="mt-2 text-xs text-ink-soft">{c.speechHint}</p>
+        </div>
+        <div className="flex flex-wrap justify-center gap-2">
+          <span className="pill-tag bg-sage-pale text-sage-deep">Valence {c.valence.toFixed(2)}</span>
+          <span className="pill-tag bg-mustard-pale text-[#8A5B0E]">Energy {c.energy.toFixed(2)}</span>
+          <span className="pill-tag bg-coral-pale text-[#B4531E]">{c.color}</span>
         </div>
       </div>
 
+      {/* Atur mood */}
       <Card>
-        <h3 className="font-bold text-lg mb-3">Atur mood (manual)</h3>
-        <div className="grid md:grid-cols-2 gap-4">
+        <h3 className="mb-3 font-display text-xl font-bold text-brown">Atur mood (manual)</h3>
+        <div className="grid gap-4 md:grid-cols-2">
           <div>
-            <label className="text-sm text-gray-600">Label</label>
+            <label className="text-sm text-ink-soft">Label</label>
             <select
-              className="w-full border rounded-lg px-3 py-2 mt-1"
+              className="mt-1 w-full rounded-md border border-ink/15 bg-paper px-3 py-2 text-ink"
               value={label}
               onChange={(e) => setLabel(e.target.value as MoodLabel)}
             >
@@ -209,16 +229,16 @@ function MoodPanel() {
             </select>
           </div>
           <div>
-            <label className="text-sm text-gray-600">Catatan</label>
+            <label className="text-sm text-ink-soft">Catatan</label>
             <input
-              className="w-full border rounded-lg px-3 py-2 mt-1"
+              className="mt-1 w-full rounded-md border border-ink/15 bg-paper px-3 py-2 text-ink"
               value={note}
               onChange={(e) => setNote(e.target.value)}
               placeholder="Kenapa moodnya seperti ini..."
             />
           </div>
           <div>
-            <label className="text-sm text-gray-600">Valence ({valence.toFixed(2)})</label>
+            <label className="text-sm text-ink-soft">Valence ({valence.toFixed(2)})</label>
             <input
               type="range"
               min={-1}
@@ -226,11 +246,11 @@ function MoodPanel() {
               step={0.05}
               value={valence}
               onChange={(e) => setValence(Number(e.target.value))}
-              className="w-full mt-2"
+              className="mt-2 w-full accent-[#5E7A3E]"
             />
           </div>
           <div>
-            <label className="text-sm text-gray-600">Energy ({energy.toFixed(2)})</label>
+            <label className="text-sm text-ink-soft">Energy ({energy.toFixed(2)})</label>
             <input
               type="range"
               min={0}
@@ -238,61 +258,70 @@ function MoodPanel() {
               step={0.05}
               value={energy}
               onChange={(e) => setEnergy(Number(e.target.value))}
-              className="w-full mt-2"
+              className="mt-2 w-full accent-[#EA7A41]"
             />
           </div>
         </div>
-        <div className="flex gap-2 mt-4">
-          <button
-            onClick={save}
-            disabled={saving}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg disabled:opacity-50"
-          >
+        <div className="mt-4 flex gap-3">
+          <button onClick={save} disabled={saving} className="btn btn-primary disabled:opacity-50">
             {saving ? 'Saving...' : 'Simpan mood'}
           </button>
-          <button
-            onClick={regenerate}
-            disabled={saving}
-            className="px-4 py-2 border rounded-lg disabled:opacity-50"
-          >
+          <button onClick={regenerate} disabled={saving} className="btn btn-secondary disabled:opacity-50">
             Regenerate AI
           </button>
         </div>
       </Card>
 
+      {/* Riwayat hari ini */}
       <Card>
-        <h3 className="font-bold text-lg mb-3">Riwayat mood hari ini</h3>
+        <h3 className="mb-3 font-display text-xl font-bold text-brown">Riwayat mood hari ini</h3>
         {mood.history?.length ? (
-          <div className="space-y-2 max-h-72 overflow-auto">
+          <div className="max-h-72 space-y-2 overflow-auto pr-1">
             {[...mood.history].reverse().map((h, i) => (
-              <div key={i} className="flex items-center gap-3 bg-gray-50 rounded-lg p-3">
-                <div className="w-4 h-4 rounded-full" style={{ backgroundColor: h.color }} />
-                <div className="flex-1">
-                  <div className="font-medium capitalize">
-                    {h.label} · <span className="text-xs text-gray-500">{h.source}</span>
-                  </div>
-                  <div className="text-xs text-gray-600">{h.note}</div>
+              <div key={i} className="flex items-center gap-3 rounded-md bg-cream px-3 py-2.5">
+                <div
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-lg"
+                  style={{ backgroundColor: h.color }}
+                >
+                  {h.emoji}
                 </div>
-                <div className="text-xs text-gray-500 whitespace-nowrap">
+                <div className="flex-1">
+                  <div className="font-semibold capitalize text-brown">
+                    {h.label} · <span className="text-xs font-normal text-ink-soft">{h.source}</span>
+                  </div>
+                  <div className="text-xs text-ink-soft">{h.note}</div>
+                </div>
+                <div className="whitespace-nowrap text-xs text-ink-soft">
                   {new Date(h.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 </div>
               </div>
             ))}
           </div>
         ) : (
-          <p className="text-gray-500 text-sm">Belum ada history</p>
+          <p className="text-sm text-ink-soft">Belum ada history</p>
         )}
       </Card>
 
+      {/* 7 hari terakhir */}
       <Card>
-        <h3 className="font-bold text-lg mb-3">7 hari terakhir</h3>
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-2">
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="font-display text-xl font-bold text-brown">7 hari terakhir</h3>
+          <span className="pill-tag bg-mustard-pale text-[#8A5B0E]">This week</span>
+        </div>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
           {history.map((d) => (
-            <div key={d.date} className="rounded-xl p-3 text-white" style={{ backgroundColor: d.current.color }}>
-              <div className="text-xs opacity-90">{d.date.slice(5)}</div>
-              <div className="font-bold capitalize mt-1">
-                {d.current.emoji} {d.current.label}
+            <div key={d.date} className="flex flex-col items-center">
+              <div
+                className="flex h-14 w-14 items-center justify-center rounded-full text-2xl shadow-soft-sm"
+                style={{ backgroundColor: d.current.color }}
+                title={d.current.color}
+              >
+                {d.current.emoji}
               </div>
+              <div className="mt-1 text-center text-xs font-semibold capitalize text-brown-soft">
+                {d.current.label}
+              </div>
+              <div className="text-[10px] text-ink-soft">{d.date.slice(5)}</div>
             </div>
           ))}
         </div>
@@ -301,24 +330,7 @@ function MoodPanel() {
   );
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="bg-white/15 rounded-xl p-3 backdrop-blur-sm">
-      <div className="text-xs opacity-80">{label}</div>
-      <div className="font-semibold text-sm mt-1 break-all">{value}</div>
-    </div>
-  );
-}
-
-function shade(hex: string, percent: number): string {
-  const raw = hex.replace('#', '');
-  if (raw.length !== 6) return hex;
-  const num = parseInt(raw, 16);
-  const r = Math.min(255, Math.max(0, (num >> 16) + Math.round(2.55 * percent)));
-  const g = Math.min(255, Math.max(0, ((num >> 8) & 0xff) + Math.round(2.55 * percent)));
-  const b = Math.min(255, Math.max(0, (num & 0xff) + Math.round(2.55 * percent)));
-  return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
-}
+/* ============================== PERSONA ============================== */
 
 function PersonaPanel() {
   const [persona, setPersona] = useState<PersonaProfile | null>(null);
@@ -336,8 +348,8 @@ function PersonaPanel() {
   if (!persona) {
     return (
       <Card>
-        <h2 className="text-xl font-bold mb-2">Belum onboard</h2>
-        <p className="text-gray-600">
+        <h2 className="mb-2 font-display text-2xl font-bold text-brown">Belum onboard</h2>
+        <p className="text-ink-soft">
           Kirim pesan WhatsApp ke bot. Dia akan minta kamu perkenalkan siapa dia (nama, peran,
           sifat, gaya bicara).
         </p>
@@ -346,9 +358,10 @@ function PersonaPanel() {
   }
 
   return (
-    <Card>
-      <h2 className="text-2xl font-bold mb-4">{persona.name}</h2>
-      <div className="grid md:grid-cols-2 gap-4 text-sm">
+    <Card className="!p-6">
+      <span className="eyebrow mb-4">● Persona</span>
+      <h2 className="mb-5 font-display text-3xl font-bold text-brown">{persona.name}</h2>
+      <div className="grid gap-4 text-sm md:grid-cols-2">
         <Info label="Role" value={persona.role} />
         <Info label="Relasi" value={persona.relationshipToUser} />
         <Info label="User" value={persona.userName || '-'} />
@@ -366,6 +379,8 @@ function PersonaPanel() {
     </Card>
   );
 }
+
+/* ============================== SCHEDULE ============================== */
 
 function SchedulePanel() {
   const [schedule, setSchedule] = useState<DailySchedule | null>(null);
@@ -387,35 +402,53 @@ function SchedulePanel() {
   if (!schedule) return <Card>Belum ada jadwal. Onboard persona dulu via WhatsApp.</Card>;
 
   return (
-    <div className="space-y-4">
-      <Card>
-        <h2 className="text-xl font-bold mb-1">Jadwal {schedule.date}</h2>
-        <p className="text-gray-600 mb-4">{schedule.summary}</p>
-        <div className="space-y-2">
+    <div className="space-y-6">
+      <Card className="!p-6">
+        <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="font-display text-2xl font-bold text-brown">Jadwal {schedule.date}</h2>
+          <span className="pill-tag bg-sage-pale text-sage-deep">{schedule.moodLabel || 'hari'}</span>
+        </div>
+        <p className="mb-5 text-ink-soft">{schedule.summary}</p>
+        <div className="space-y-2.5">
           {schedule.activities?.map((a) => (
-            <div key={a.id} className="bg-gray-50 rounded-lg p-3 flex items-start justify-between gap-3">
+            <div
+              key={a.id}
+              className="flex items-start justify-between gap-3 rounded-md bg-cream px-4 py-3"
+            >
               <div>
-                <div className="font-medium text-gray-900">{a.title}</div>
-                {a.description ? <div className="text-sm text-gray-600">{a.description}</div> : null}
+                <div className="font-semibold text-brown">{a.title}</div>
+                {a.description ? (
+                  <div className="text-sm text-ink-soft">{a.description}</div>
+                ) : null}
               </div>
-              <div className="text-right text-xs text-gray-500 whitespace-nowrap">
-                <div>{new Date(a.startAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              <div className="flex shrink-0 flex-col items-end gap-1.5">
+                <span className="text-xs whitespace-nowrap text-ink-soft">
+                  {new Date(a.startAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                   {' - '}
                   {new Date(a.endAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </div>
-                <div className="mt-1 uppercase tracking-wide">{a.status}</div>
+                </span>
+                <span className={`pill-tag ${STATUS_STYLE[a.status] || 'bg-cream-deep text-ink-soft'}`}>
+                  {a.status}
+                </span>
               </div>
             </div>
           ))}
         </div>
       </Card>
       <Card>
-        <h3 className="font-bold mb-2">Context text</h3>
-        <pre className="text-xs whitespace-pre-wrap text-gray-700">{context}</pre>
+        <div className="mb-2 flex items-center justify-between">
+          <h3 className="font-display text-lg font-bold text-brown">Context text</h3>
+          <span className="pill-tag bg-sage-pale text-sage-deep">prompt</span>
+        </div>
+        <pre className="max-h-80 overflow-auto whitespace-pre-wrap rounded-md bg-cream p-4 text-xs text-ink-soft">
+          {context}
+        </pre>
       </Card>
     </div>
   );
 }
+
+/* ============================== TOOLS ============================== */
 
 function ToolsPanel() {
   const [tools, setTools] = useState<Tool[]>([]);
@@ -452,32 +485,42 @@ function ToolsPanel() {
 
   return (
     <div>
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-        <Stat label="Total" value={tools.length} />
-        <Stat label="Aktif" value={tools.filter((t) => t.enabled).length} />
-        <Stat label="Custom" value={tools.filter((t) => t.category === 'custom').length} />
+      <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-3">
+        <StatCard tone="brown" label="Total Tools" value={tools.length} />
+        <StatCard tone="sage" label="Aktif" value={tools.filter((t) => t.enabled).length} />
+        <StatCard tone="mustard" label="Custom" value={tools.filter((t) => t.category === 'custom').length} />
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
         {tools.map((tool) => (
-          <div key={tool.id} className="bg-white rounded-xl shadow p-5">
-            <div className="flex justify-between items-start mb-2">
+          <div key={tool.id} className="card flex flex-col p-5">
+            <div className="mb-2 flex items-start justify-between gap-2">
               <div>
-                <h3 className="font-bold text-gray-900">{tool.name}</h3>
-                <p className="text-xs text-gray-500">{tool.category} · {tool.source || 'n/a'}</p>
+                <h3 className="font-display text-lg font-bold text-brown">{tool.name}</h3>
+                <span className="pill-tag mt-1 bg-sage-pale text-sage-deep">
+                  {tool.category} · {tool.source || 'n/a'}
+                </span>
               </div>
-              <input type="checkbox" checked={tool.enabled} onChange={() => toggle(tool)} />
+              <input
+                type="checkbox"
+                checked={tool.enabled}
+                onChange={() => toggle(tool)}
+                className="mt-1 h-5 w-5 accent-[#5E7A3E]"
+              />
             </div>
-            <p className="text-sm text-gray-600 mb-4 line-clamp-3">{tool.description}</p>
+            <p className="mb-4 line-clamp-3 flex-1 text-sm text-ink-soft">{tool.description}</p>
             <div className="flex gap-2">
               <button
                 onClick={() => openDetails(tool)}
-                className="flex-1 bg-blue-50 text-blue-700 rounded-lg py-2 text-sm"
+                className="flex-1 rounded-pill bg-sage-pale py-2 text-sm font-semibold text-sage-deep transition-colors hover:bg-sage hover:text-white"
               >
                 Detail
               </button>
               {!tool.builtin && (
-                <button onClick={() => remove(tool.id)} className="px-3 text-red-600 text-sm">
+                <button
+                  onClick={() => remove(tool.id)}
+                  className="px-3 text-sm font-semibold text-coral hover:underline"
+                >
                   Hapus
                 </button>
               )}
@@ -486,32 +529,39 @@ function ToolsPanel() {
         ))}
       </div>
 
-      <button
-        onClick={() => setShowCreate(true)}
-        className="fixed bottom-8 right-8 w-14 h-14 bg-blue-600 text-white rounded-full shadow-lg text-3xl"
-      >
+      <button onClick={() => setShowCreate(true)} className="fab" aria-label="Buat tool">
         +
       </button>
 
       {selectedTool && (
         <Modal onClose={() => setSelectedTool(null)} title={selectedTool.name}>
-          <p className="text-gray-600 mb-4">{selectedTool.description}</p>
-          <h4 className="font-bold mb-2">Parameters</h4>
-          <pre className="text-xs bg-gray-50 p-3 rounded mb-4 overflow-auto">
+          <p className="mb-4 text-ink-soft">{selectedTool.description}</p>
+          <h4 className="mb-2 font-display text-lg font-bold text-brown">Parameters</h4>
+          <pre className="mb-4 overflow-auto rounded-md bg-cream p-3 text-xs text-ink-soft">
             {JSON.stringify(selectedTool.parameters, null, 2)}
           </pre>
-          <h4 className="font-bold mb-2">Recent executions</h4>
+          <h4 className="mb-2 font-display text-lg font-bold text-brown">Recent executions</h4>
           {executions.length === 0 ? (
-            <p className="text-gray-500 text-sm">Belum ada</p>
+            <p className="text-sm text-ink-soft">Belum ada</p>
           ) : (
-            <div className="space-y-2 max-h-64 overflow-auto">
+            <div className="max-h-64 space-y-2 overflow-auto pr-1">
               {executions.map((e, i) => (
-                <div key={i} className="bg-gray-50 rounded p-2 text-xs">
-                  <div className="flex justify-between mb-1">
-                    <span>{e.success ? 'success' : 'failed'}</span>
-                    <span>{new Date(e.timestamp).toLocaleString()}</span>
+                <div key={i} className="rounded-md bg-cream p-2.5 text-xs">
+                  <div className="mb-1 flex justify-between">
+                    <span
+                      className={`pill-tag ${
+                        e.success ? 'bg-sage-pale text-sage-deep' : 'bg-coral-pale text-coral'
+                      }`}
+                    >
+                      {e.success ? 'success' : 'failed'}
+                    </span>
+                    <span className="text-ink-soft">
+                      {new Date(e.timestamp).toLocaleString()}
+                    </span>
                   </div>
-                  <pre className="overflow-auto">{JSON.stringify(e.parameters, null, 2)}</pre>
+                  <pre className="overflow-auto text-ink-soft">
+                    {JSON.stringify(e.parameters, null, 2)}
+                  </pre>
                 </div>
               ))}
             </div>
@@ -563,35 +613,31 @@ function CreateToolModal({ onClose, onCreated }: { onClose: () => void; onCreate
     <Modal onClose={onClose} title="Create Custom Tool">
       <form onSubmit={submit} className="space-y-3">
         <input
-          className="w-full border rounded-lg px-3 py-2"
+          className="w-full rounded-md border border-ink/15 bg-paper px-3 py-2 text-ink"
           placeholder="tool_name"
           value={name}
           onChange={(e) => setName(e.target.value)}
           required
         />
         <textarea
-          className="w-full border rounded-lg px-3 py-2"
+          className="w-full rounded-md border border-ink/15 bg-paper px-3 py-2 text-ink"
           placeholder="description"
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           required
         />
         <textarea
-          className="w-full border rounded-lg px-3 py-2 font-mono text-sm"
+          className="w-full rounded-md border border-ink/15 bg-paper px-3 py-2 font-mono text-sm"
           rows={10}
           value={functionCode}
           onChange={(e) => setFunctionCode(e.target.value)}
           required
         />
-        <div className="flex gap-2">
-          <button type="button" onClick={onClose} className="flex-1 border rounded-lg py-2">
+        <div className="flex gap-3">
+          <button type="button" onClick={onClose} className="btn btn-secondary flex-1 justify-center">
             Cancel
           </button>
-          <button
-            type="submit"
-            disabled={busy}
-            className="flex-1 bg-blue-600 text-white rounded-lg py-2 disabled:opacity-50"
-          >
+          <button type="submit" disabled={busy} className="btn btn-primary flex-1 justify-center disabled:opacity-50">
             {busy ? 'Saving...' : 'Create'}
           </button>
         </div>
@@ -600,24 +646,42 @@ function CreateToolModal({ onClose, onCreated }: { onClose: () => void; onCreate
   );
 }
 
-function Card({ children }: { children: React.ReactNode }) {
-  return <div className="bg-white rounded-xl shadow-lg p-6">{children}</div>;
+/* ============================== SHARED ============================== */
+
+function Card({ children, className = '' }: { children: React.ReactNode; className?: string }) {
+  return <div className={`card p-5 ${className}`}>{children}</div>;
 }
 
 function Info({ label, value }: { label: string; value: string }) {
   return (
-    <div>
-      <div className="text-xs uppercase tracking-wide text-gray-500">{label}</div>
-      <div className="text-gray-900">{value}</div>
+    <div className="rounded-md bg-cream px-4 py-3">
+      <div className="text-[11px] uppercase tracking-widest text-ink-soft">{label}</div>
+      <div className="mt-0.5 text-brown">{value}</div>
     </div>
   );
 }
 
-function Stat({ label, value }: { label: string; value: number }) {
+function StatCard({
+  tone,
+  label,
+  value,
+}: {
+  tone: 'brown' | 'sage' | 'mustard';
+  label: string;
+  value: number;
+}) {
+  const tones: Record<string, string> = {
+    brown: 'bg-brown text-cream',
+    sage: 'bg-sage-deep text-white',
+    mustard: 'bg-mustard text-brown',
+  };
   return (
-    <div className="bg-white rounded-xl shadow p-5">
-      <div className="text-3xl font-bold text-blue-600">{value}</div>
-      <div className="text-gray-600">{label}</div>
+    <div className={`flex min-h-[150px] flex-col justify-between rounded-xl p-6 shadow-soft ${tones[tone]}`}>
+      <div className="text-sm opacity-85">{label}</div>
+      <div>
+        <div className="font-display text-5xl font-extrabold">{value}</div>
+        <div className="text-[13px] opacity-80">Niche Daily</div>
+      </div>
     </div>
   );
 }
@@ -632,11 +696,11 @@ function Modal({
   onClose: () => void;
 }) {
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-        <div className="p-5 border-b flex items-center justify-between sticky top-0 bg-white">
-          <h2 className="text-xl font-bold">{title}</h2>
-          <button onClick={onClose} className="text-2xl text-gray-500">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-brown/40 p-4">
+      <div className="card-xl max-h-[90vh] w-full max-w-2xl overflow-y-auto">
+        <div className="sticky top-0 flex items-center justify-between border-b border-ink/10 bg-paper p-5">
+          <h2 className="font-display text-xl font-bold text-brown">{title}</h2>
+          <button onClick={onClose} className="text-2xl text-ink-soft hover:text-brown">
             ×
           </button>
         </div>

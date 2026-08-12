@@ -1,27 +1,52 @@
+@import url('https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;600;700;800&family=Poppins:wght@300;400;500;600;700&display=swap');
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  --foreground-rgb: 0, 0, 0;
-  --background-start-rgb: 214, 219, 220;
-  --background-end-rgb: 255, 255, 255;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --foreground-rgb: 255, 255, 255;
-    --background-start-rgb: 0, 0, 0;
-    --background-end-rgb: 0, 0, 0;
-  }
+  --cream: #fbf3e7;
+  --cream-deep: #f3e7d4;
+  --paper: #fffdf9;
+  --ink: #3a2a1d;
+  --ink-soft: #6b5c4f;
+  --brown: #3e2b1e;
+  --sage-deep: #5e7a3e;
+  --line: rgba(58, 42, 29, 0.12);
 }
 
 body {
-  color: rgb(var(--foreground-rgb));
-  background: linear-gradient(
-      to bottom,
-      transparent,
-      rgb(var(--background-end-rgb))
-    )
-    rgb(var(--background-start-rgb));
+  color: var(--ink);
+  background: var(--cream);
+  font-family: 'Poppins', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+@layer components {
+  .eyebrow {
+    @apply inline-flex items-center gap-2 rounded-pill bg-sage-pale px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.08em] text-sage-deep;
+  }
+  .card {
+    @apply rounded-lg border border-ink/10 bg-paper;
+  }
+  .card-xl {
+    @apply rounded-xl border border-ink/10 bg-paper;
+  }
+  .pill-tag {
+    @apply inline-flex items-center rounded-pill px-3 py-1 text-xs font-semibold;
+  }
+  .btn {
+    @apply inline-flex cursor-pointer items-center gap-2 rounded-pill px-7 py-3.5 font-body text-[15px] font-semibold transition-transform hover:scale-[1.02] active:scale-[0.98];
+  }
+  .btn-primary {
+    @apply bg-brown text-cream;
+  }
+  .btn-secondary {
+    @apply border-[1.5px] border-brown bg-transparent text-brown;
+  }
+  .btn-accent {
+    @apply bg-sage text-white;
+  }
+  .fab {
+    @apply fixed bottom-8 right-8 flex h-14 w-14 cursor-pointer items-center justify-center rounded-full bg-sage text-3xl text-white shadow-fab transition-transform hover:scale-105;
+  }
 }

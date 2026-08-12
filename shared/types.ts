@@ -246,6 +246,7 @@ export interface MoodHistoryEntry {
   valence: number;
   energy: number;
   color: string;
+  emoji: string;
   note: string;
   source: MoodSource;
 }

@@ -50,7 +50,6 @@ export default function WhatsAppStatus() {
       const data: QRResponse = await response.json();
       if (data.qr) setQrCode(data.qr);
       else if (data.connected) setQrCode(null);
-      // keep previous QR briefly if reconnecting without new one yet
       setError(null);
       return data;
     } catch (err) {
@@ -69,7 +68,6 @@ export default function WhatsAppStatus() {
       if (!response.ok) throw new Error(data.error || 'restart failed');
       setQrCode(null);
       setStatus(data.status || null);
-      // Baileys needs a moment to emit QR
       setTimeout(() => {
         fetchQR();
         fetchStatus();
@@ -106,37 +104,35 @@ export default function WhatsAppStatus() {
 
   if (loading) {
     return (
-      <div className="bg-white rounded-xl shadow-lg p-6">
-        <div className="flex items-center justify-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-          <span className="ml-3 text-gray-600">Loading WhatsApp status...</span>
-        </div>
+      <div className="card-xl flex items-center justify-center p-10">
+        <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-sage-deep"></div>
+        <span className="ml-3 text-ink-soft">Loading WhatsApp status...</span>
       </div>
     );
   }
 
   if (status?.connected) {
     return (
-      <div className="bg-white rounded-xl shadow-lg p-6 space-y-4">
-        <div className="flex items-center justify-between">
+      <div className="card-xl space-y-5 p-6">
+        <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center">
-            <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center text-sm font-bold text-green-700">
-              OK
+            <div className="flex h-14 w-14 items-center justify-center rounded-full bg-sage text-2xl text-white shadow-soft-sm">
+              ✓
             </div>
             <div className="ml-4">
-              <h3 className="text-lg font-bold text-gray-900">WhatsApp Connected</h3>
-              <p className="text-sm text-gray-600">Siap terima & kirim pesan proaktif</p>
+              <h3 className="font-display text-xl font-bold text-brown">WhatsApp Connected</h3>
+              <p className="text-sm text-ink-soft">Siap terima & kirim pesan proaktif</p>
             </div>
           </div>
           <div className="text-right">
-            <p className="text-sm text-gray-500">Authorized</p>
-            <p className="font-mono text-sm font-medium text-gray-900">{status.authorizedPhone}</p>
+            <p className="text-xs uppercase tracking-widest text-ink-soft">Authorized</p>
+            <p className="font-mono text-sm font-semibold text-brown">{status.authorizedPhone}</p>
           </div>
         </div>
         <button
           onClick={restartPairing}
           disabled={restarting}
-          className="text-sm text-red-600 hover:underline disabled:opacity-50"
+          className="btn btn-secondary !px-5 !py-2.5 text-sm disabled:opacity-50"
         >
           {restarting ? 'Restarting...' : 'Logout & re-pair device'}
         </button>
@@ -145,59 +141,57 @@ export default function WhatsAppStatus() {
   }
 
   return (
-    <div className="bg-white rounded-xl shadow-lg p-6">
-      <div className="flex items-center justify-between mb-4">
+    <div className="card-xl space-y-4 p-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h3 className="text-lg font-bold text-gray-900">WhatsApp Connection</h3>
-          <p className="text-sm text-gray-500">
-            Status: <span className="font-medium">{status?.status || 'unknown'}</span>
+          <h3 className="font-display text-xl font-bold text-brown">WhatsApp Connection</h3>
+          <p className="text-sm text-ink-soft">
+            Status: <span className="pill-tag mt-1 bg-mustard-pale text-[#8A5B0E]">{status?.status || 'unknown'}</span>
           </p>
         </div>
         <button
           onClick={restartPairing}
           disabled={restarting}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50"
+          className="btn btn-accent disabled:opacity-50"
         >
           {restarting ? 'Generating QR...' : 'Restart Pairing / New QR'}
         </button>
       </div>
 
       {error ? (
-        <div className="mb-4 bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">
+        <div className="rounded-md border border-coral/30 bg-coral-pale p-3 text-sm text-[#B4531E]">
           {error}
         </div>
       ) : null}
 
       {status?.lastError ? (
-        <div className="mb-4 bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-sm text-yellow-800">
+        <div className="rounded-md border border-mustard/40 bg-mustard-pale p-3 text-sm text-[#8A5B0E]">
           Backend: {status.lastError}
         </div>
       ) : null}
 
       {status?.reconnectAttempts ? (
-        <div className="mb-4 text-sm text-yellow-700">
-          Reconnect attempts: {status.reconnectAttempts}
-        </div>
+        <div className="text-sm text-[#8A5B0E]">Reconnect attempts: {status.reconnectAttempts}</div>
       ) : null}
 
       {qrCode ? (
-        <div className="space-y-4">
-          <div className="bg-gray-50 rounded-lg p-6 flex flex-col items-center">
-            <p className="text-sm text-gray-600 mb-4 text-center">
+        <div className="space-y-5">
+          <div className="flex flex-col items-center rounded-lg bg-cream p-6">
+            <p className="mb-4 text-center text-sm text-ink-soft">
               Scan QR ini di WhatsApp → Linked Devices
               <br />
-              <span className="text-xs text-gray-500">
+              <span className="text-xs text-ink-soft/70">
                 (QR digenerate backend Baileys, ditampilkan di UI seperti whatsmeow)
               </span>
             </p>
-            <div className="bg-white p-4 rounded-lg shadow-sm">
+            <div className="rounded-lg bg-paper p-4 shadow-soft-sm">
               <QRCodeSVG value={qrCode} size={220} level="M" includeMargin={true} />
             </div>
-            <p className="text-xs text-gray-500 mt-3">
+            <p className="mt-3 text-xs text-ink-soft">
               QR refresh otomatis. Kalau expired, klik Restart Pairing.
             </p>
           </div>
-          <ol className="text-sm text-gray-700 list-decimal list-inside space-y-1">
+          <ol className="list-inside list-decimal space-y-1 text-sm text-ink-soft">
             <li>Buka WhatsApp di HP</li>
             <li>Settings → Linked Devices</li>
             <li>Link a Device</li>
@@ -205,10 +199,11 @@ export default function WhatsAppStatus() {
           </ol>
         </div>
       ) : (
-        <div className="bg-gray-50 rounded-lg p-8 text-center space-y-3">
-          <p className="text-gray-600">Belum ada QR.</p>
-          <p className="text-sm text-gray-500">
-            Klik <strong>Restart Pairing / New QR</strong> untuk generate dari backend.
+        <div className="space-y-3 rounded-lg bg-cream p-8 text-center">
+          <p className="text-ink-soft">Belum ada QR.</p>
+          <p className="text-sm text-ink-soft">
+            Klik <strong className="text-brown">Restart Pairing / New QR</strong> untuk generate dari
+            backend.
           </p>
         </div>
       )}

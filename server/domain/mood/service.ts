@@ -246,6 +246,7 @@ Penting: warna emosional balasan harus mengikuti mood ini secara natural (bukan 
       valence: snapshot.valence,
       energy: snapshot.energy,
       color: snapshot.color,
+      emoji: snapshot.emoji,
       note: snapshot.note,
       source,
     };
@@ -285,6 +286,7 @@ Penting: warna emosional balasan harus mengikuti mood ini secara natural (bukan 
       valence: snapshot.valence,
       energy: snapshot.energy,
       color: snapshot.color,
+      emoji: snapshot.emoji,
       note: snapshot.note,
       source,
     };
