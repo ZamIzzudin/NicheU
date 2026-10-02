@@ -16,12 +16,48 @@ export class Client {
   private http: AxiosInstance;
   private activeModel: ActiveModel;
 
+  /** HTTP statuses worth retrying: timeouts, too-early, rate limit, server errors. */
+  private static readonly RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
+
   constructor(activeModel: ActiveModel) {
     this.activeModel = activeModel;
     this.http = axios.create({
       timeout: 300000,
       validateStatus: () => true,
     });
+  }
+
+  /**
+   * Gateway calls fail transiently all the time (hiccups, rate limits, LB
+   * restarts). Retry with exponential backoff + jitter so a single blip
+   * doesn't kill an agent turn, a memory extraction, or an embedding.
+   */
+  private async withRetry<T>(label: string, fn: () => Promise<T>, attempts = 3): Promise<T> {
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      if (attempt > 1) {
+        const backoff = Math.min(800 * 2 ** (attempt - 1), 8000) + Math.floor(Math.random() * 250);
+        console.warn(
+          `[client] ${label} gagal (percobaan ${attempt - 1}/${attempts - 1}), retry dalam ${backoff}ms: ` +
+            (lastError instanceof Error ? lastError.message : String(lastError))
+        );
+        await new Promise((r) => setTimeout(r, backoff));
+      }
+      try {
+        return await fn();
+      } catch (error) {
+        lastError = error;
+        if (!this.isRetryable(error) || attempt === attempts) throw error;
+      }
+    }
+    /* istanbul ignore next */
+    throw lastError;
+  }
+
+  private isRetryable(error: unknown): boolean {
+    if (!(error instanceof ApiError)) return false;
+    if (error.type === 'request') return true; // network / timeout
+    return error.statusCode !== undefined && Client.RETRYABLE_STATUS.has(error.statusCode);
   }
 
   setActiveModel(model: ActiveModel) {
@@ -46,44 +82,46 @@ export class Client {
       return { content: result.content, toolCalls: result.toolCalls };
     }
 
-    const baseUrl = this.activeModel.base_url || env.apiBaseUrl;
-    const url = `${baseUrl.replace(/\/$/, '')}/chat/completions`;
-    const body: ChatRequest = {
-      model: this.activeModel.name,
-      messages,
-      tools: options.tools,
-      stream: false,
-      temperature: options.temperature ?? 0.7,
-      response_format: options.responseFormat,
-    };
-
-    try {
-      const response = await this.http.post(url, body, {
-        headers: {
-          Authorization: `Bearer ${this.activeModel.api_key}`,
-          'Content-Type': 'application/json',
-        },
-        responseType: 'json',
-      });
-
-      if (response.status >= 400) {
-        throw new ApiError('status', response.status, JSON.stringify(response.data));
-      }
-
-      const choice = response.data?.choices?.[0];
-      const message = choice?.message || {};
-      return {
-        content: message.content || '',
-        toolCalls: message.tool_calls || [],
-        raw: response.data,
+    return this.withRetry('chat', async () => {
+      const baseUrl = this.activeModel.base_url || env.apiBaseUrl;
+      const url = `${baseUrl.replace(/\/$/, '')}/chat/completions`;
+      const body: ChatRequest = {
+        model: this.activeModel.name,
+        messages,
+        tools: options.tools,
+        stream: false,
+        temperature: options.temperature ?? 0.7,
+        response_format: options.responseFormat,
       };
-    } catch (error: any) {
-      if (error instanceof ApiError) throw error;
-      if (axios.isAxiosError(error)) {
-        throw new ApiError('request', error.response?.status, error.message);
+
+      try {
+        const response = await this.http.post(url, body, {
+          headers: {
+            Authorization: `Bearer ${this.activeModel.api_key}`,
+            'Content-Type': 'application/json',
+          },
+          responseType: 'json',
+        });
+
+        if (response.status >= 400) {
+          throw new ApiError('status', response.status, JSON.stringify(response.data));
+        }
+
+        const choice = response.data?.choices?.[0];
+        const message = choice?.message || {};
+        return {
+          content: message.content || '',
+          toolCalls: message.tool_calls || [],
+          raw: response.data,
+        };
+      } catch (error: any) {
+        if (error instanceof ApiError) throw error;
+        if (axios.isAxiosError(error)) {
+          throw new ApiError('request', error.response?.status, error.message);
+        }
+        throw new ApiError('request', undefined, error.message);
       }
-      throw new ApiError('request', undefined, error.message);
-    }
+    });
   }
 
   async chatStream(
@@ -91,42 +129,55 @@ export class Client {
     tools: ToolDefinition[],
     onToken: (token: string) => void
   ): Promise<StreamResult> {
-    const baseUrl = this.activeModel.base_url || env.apiBaseUrl;
-    const url = `${baseUrl.replace(/\/$/, '')}/chat/completions`;
+    // Retry is only safe BEFORE the first token reached the caller; after that
+    // a retry would duplicate already-streamed output.
+    let firstTokenSeen = false;
 
-    const request: ChatRequest = {
-      model: this.activeModel.name,
-      messages,
-      tools: tools.length ? tools : undefined,
-      stream: true,
-      // slightly higher for more natural chat variance (persona style)
-      temperature: 0.95,
-    };
+    return this.withRetry('chatStream', async () => {
+      const baseUrl = this.activeModel.base_url || env.apiBaseUrl;
+      const url = `${baseUrl.replace(/\/$/, '')}/chat/completions`;
 
-    try {
-      const response = await axios.post(url, request, {
-        headers: {
-          Authorization: `Bearer ${this.activeModel.api_key}`,
-          'Content-Type': 'application/json',
-        },
-        responseType: 'stream',
-        timeout: 300000,
-        validateStatus: () => true,
-      });
+      const request: ChatRequest = {
+        model: this.activeModel.name,
+        messages,
+        tools: tools.length ? tools : undefined,
+        stream: true,
+        // slightly higher for more natural chat variance (persona style)
+        temperature: 0.95,
+      };
 
-      if (response.status >= 400) {
-        const body = await this.getStreamText(response.data);
-        throw new ApiError('status', response.status, body);
+      try {
+        const response = await axios.post(url, request, {
+          headers: {
+            Authorization: `Bearer ${this.activeModel.api_key}`,
+            'Content-Type': 'application/json',
+          },
+          responseType: 'stream',
+          timeout: 300000,
+          validateStatus: () => true,
+        });
+
+        if (response.status >= 400) {
+          const body = await this.getStreamText(response.data);
+          throw new ApiError('status', response.status, body);
+        }
+
+        return await this.processStream(response.data, (token) => {
+          firstTokenSeen = true;
+          onToken(token);
+        });
+      } catch (error: any) {
+        // Mid-stream failure after tokens were emitted: never retry.
+        if (firstTokenSeen && error instanceof ApiError && error.type === 'request') {
+          throw new Error(`stream interrupted after tokens: ${error.body || error.message}`);
+        }
+        if (error instanceof ApiError) throw error;
+        if (axios.isAxiosError(error)) {
+          throw new ApiError('request', error.response?.status, error.message);
+        }
+        throw new ApiError('request', undefined, error.message);
       }
-
-      return await this.processStream(response.data, onToken);
-    } catch (error: any) {
-      if (error instanceof ApiError) throw error;
-      if (axios.isAxiosError(error)) {
-        throw new ApiError('request', error.response?.status, error.message);
-      }
-      throw new ApiError('request', undefined, error.message);
-    }
+    });
   }
 
   /**
@@ -137,101 +188,105 @@ export class Client {
     dataUrl: string,
     options: { caption?: string; mime?: string } = {}
   ): Promise<string> {
-    const baseUrl = this.activeModel.base_url || env.apiBaseUrl;
-    const url = `${baseUrl.replace(/\/$/, '')}/chat/completions`;
-    const model = env.visionModel || this.activeModel.name;
-    const captionHint = options.caption
-      ? `Caption dari pengirim: "${options.caption}"`
-      : 'Tidak ada caption dari pengirim.';
+    return this.withRetry('vision', async () => {
+      const baseUrl = this.activeModel.base_url || env.apiBaseUrl;
+      const url = `${baseUrl.replace(/\/$/, '')}/chat/completions`;
+      const model = env.visionModel || this.activeModel.name;
+      const captionHint = options.caption
+        ? `Caption dari pengirim: "${options.caption}"`
+        : 'Tidak ada caption dari pengirim.';
 
-    const body = {
-      model,
-      temperature: 0.2,
-      max_tokens: 700,
-      messages: [
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'text',
-              text:
-                'Kamu membantu asisten chat WhatsApp memahami foto yang dikirim user.\n' +
-                'Deskripsikan gambar secara ringkas tapi cukup detail supaya bisa dibalas natural.\n' +
-                'Bahasa: Indonesia, gaya faktual.\n' +
-                'Sebutkan: objek utama, teks terlihat (OCR jika ada), suasana, orang (tanpa nebak identitas sensitif), lokasi/konteks jika jelas.\n' +
-                'Jangan mengarang detail yang tidak terlihat.\n' +
-                `${captionHint}\n` +
-                'Output: 3-8 kalimat deskripsi saja, tanpa markdown.',
-            },
-            {
-              type: 'image_url',
-              image_url: { url: dataUrl, detail: 'auto' as const },
-            },
-          ],
-        },
-      ],
-    };
+      const body = {
+        model,
+        temperature: 0.2,
+        max_tokens: 700,
+        messages: [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text:
+                  'Kamu membantu asisten chat WhatsApp memahami foto yang dikirim user.\n' +
+                  'Deskripsikan gambar secara ringkas tapi cukup detail supaya bisa dibalas natural.\n' +
+                  'Bahasa: Indonesia, gaya faktual.\n' +
+                  'Sebutkan: objek utama, teks terlihat (OCR jika ada), suasana, orang (tanpa nebak identitas sensitif), lokasi/konteks jika jelas.\n' +
+                  'Jangan mengarang detail yang tidak terlihat.\n' +
+                  `${captionHint}\n` +
+                  'Output: 3-8 kalimat deskripsi saja, tanpa markdown.',
+              },
+              {
+                type: 'image_url',
+                image_url: { url: dataUrl, detail: 'auto' as const },
+              },
+            ],
+          },
+        ],
+      };
 
-    try {
-      const response = await this.http.post(url, body, {
-        headers: {
-          Authorization: `Bearer ${this.activeModel.api_key}`,
-          'Content-Type': 'application/json',
-        },
-        responseType: 'json',
-      });
-
-      if (response.status >= 400) {
-        throw new ApiError('status', response.status, JSON.stringify(response.data));
-      }
-
-      const content = response.data?.choices?.[0]?.message?.content;
-      if (typeof content === 'string' && content.trim()) return content.trim();
-      if (Array.isArray(content)) {
-        const text = content
-          .map((p: any) => (typeof p === 'string' ? p : p?.text || ''))
-          .join(' ')
-          .trim();
-        if (text) return text;
-      }
-      throw new ApiError('parse', undefined, 'Empty vision response');
-    } catch (error: any) {
-      if (error instanceof ApiError) throw error;
-      if (axios.isAxiosError(error)) {
-        throw new ApiError('request', error.response?.status, error.message);
-      }
-      throw new ApiError('request', undefined, error.message);
-    }
-  }
-
-  async embed(text: string): Promise<number[]> {
-    const url = `${env.apiBaseUrl}/embeddings`;
-    try {
-      const response = await this.http.post(
-        url,
-        { model: env.embeddingModel, input: text },
-        {
+      try {
+        const response = await this.http.post(url, body, {
           headers: {
-            Authorization: `Bearer ${env.apiKey}`,
+            Authorization: `Bearer ${this.activeModel.api_key}`,
             'Content-Type': 'application/json',
           },
           responseType: 'json',
+        });
+
+        if (response.status >= 400) {
+          throw new ApiError('status', response.status, JSON.stringify(response.data));
         }
-      );
 
-      if (response.status >= 400) {
-        throw new ApiError('status', response.status, JSON.stringify(response.data));
+        const content = response.data?.choices?.[0]?.message?.content;
+        if (typeof content === 'string' && content.trim()) return content.trim();
+        if (Array.isArray(content)) {
+          const text = content
+            .map((p: any) => (typeof p === 'string' ? p : p?.text || ''))
+            .join(' ')
+            .trim();
+          if (text) return text;
+        }
+        throw new ApiError('parse', undefined, 'Empty vision response');
+      } catch (error: any) {
+        if (error instanceof ApiError) throw error;
+        if (axios.isAxiosError(error)) {
+          throw new ApiError('request', error.response?.status, error.message);
+        }
+        throw new ApiError('request', undefined, error.message);
       }
+    });
+  }
 
-      const embedding = response.data?.data?.[0]?.embedding;
-      if (!Array.isArray(embedding)) {
-        throw new ApiError('parse', undefined, 'Invalid embedding response');
+  async embed(text: string): Promise<number[]> {
+    return this.withRetry('embed', async () => {
+      const url = `${env.apiBaseUrl}/embeddings`;
+      try {
+        const response = await this.http.post(
+          url,
+          { model: env.embeddingModel, input: text },
+          {
+            headers: {
+              Authorization: `Bearer ${env.apiKey}`,
+              'Content-Type': 'application/json',
+            },
+            responseType: 'json',
+          }
+        );
+
+        if (response.status >= 400) {
+          throw new ApiError('status', response.status, JSON.stringify(response.data));
+        }
+
+        const embedding = response.data?.data?.[0]?.embedding;
+        if (!Array.isArray(embedding)) {
+          throw new ApiError('parse', undefined, 'Invalid embedding response');
+        }
+        return embedding;
+      } catch (error: any) {
+        if (error instanceof ApiError) throw error;
+        throw new ApiError('request', undefined, error.message);
       }
-      return embedding;
-    } catch (error: any) {
-      if (error instanceof ApiError) throw error;
-      throw new ApiError('request', undefined, error.message);
-    }
+    });
   }
 
   private async processStream(stream: any, onToken: (token: string) => void): Promise<StreamResult> {
