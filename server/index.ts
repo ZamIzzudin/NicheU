@@ -12,6 +12,7 @@ import { ProactiveService } from './domain/proactive/service';
 import { MoodService } from './domain/mood/service';
 import { ReminderService } from './domain/reminder/service';
 import { BotService } from './domain/bots/service';
+import { UserStateService } from './domain/state/service';
 import { WhatsAppBot } from './integrations/whatsapp/bot';
 import { JobScheduler } from './jobs/scheduler';
 import { createApiRouter } from './routes/api';
@@ -43,6 +44,7 @@ async function main() {
   const conversationService = new ConversationService(db, client, memoryService);
   const moodService = new MoodService(db, client);
   const reminderService = new ReminderService(db, client);
+  const userStateService = new UserStateService(db);
   const botService = new BotService(db);
   await botService.ensureDemoBots();
   const proactiveService = new ProactiveService(
@@ -51,7 +53,8 @@ async function main() {
     scheduleService,
     moodService,
     conversationService,
-    memoryService
+    memoryService,
+    userStateService
   );
   await proactiveService.init();
   console.log('✓ Proactive service ready\n');
@@ -88,7 +91,8 @@ async function main() {
     conversationService,
     proactiveService,
     moodService,
-    reminderService
+    reminderService,
+    userStateService
   );
   await whatsappBot.start();
   console.log('✓ WhatsApp bot started\n');
@@ -151,6 +155,7 @@ async function main() {
       botService,
       whatsappBot,
       client,
+      userStateService,
     })
   );
 

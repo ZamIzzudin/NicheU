@@ -7,6 +7,7 @@ import { ScheduleService } from '../schedule/service';
 import { MoodService } from '../mood/service';
 import { ConversationService } from '../conversation/service';
 import { MemoryService } from '../memory/service';
+import { UserStateService } from '../state/service';
 
 export type OutboundSender = (userId: string, text: string) => Promise<void>;
 
@@ -22,7 +23,8 @@ export class ProactiveService {
     private scheduleService: ScheduleService,
     private moodService?: MoodService,
     private conversationService?: ConversationService,
-    private memoryService?: MemoryService
+    private memoryService?: MemoryService,
+    private userStateService?: UserStateService
   ) {}
 
   async init(): Promise<void> {
@@ -187,13 +189,14 @@ export class ProactiveService {
     let conversationContext = '';
     let memoryContext = '';
     let sentProactiveContext = '';
+    let stateContext = '';
 
     try {
       if (this.conversationService) {
         const day = await this.conversationService.getDayContext(userId);
         const bubbles = day.messages
           .filter((m: any) => m.role === 'user' || m.role === 'assistant')
-          .slice(-8)
+          .slice(-14)
           .map((m: any) => {
             const c =
               typeof m.content === 'string'
@@ -218,11 +221,33 @@ export class ProactiveService {
 
     try {
       if (this.memoryService) {
-        const mems = await this.memoryService.recent(userId, 5);
-        memoryContext = this.memoryService.formatContext(mems);
+        // Gabungkan memori TERPENTING + memori TERBARU (fakta segar hari ini
+        // sering importance-nya biasa saja tapi justru itu yang tidak boleh
+        // ditanyakan ulang).
+        const [important, fresh] = await Promise.all([
+          this.memoryService.recent(userId, 5),
+          this.memoryService.latest(userId, 5),
+        ]);
+        const seen = new Set<string>();
+        const merged = [...important, ...fresh].filter((m) => {
+          const key = String((m as any)._id || m.content);
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+        memoryContext = this.memoryService.formatContext(merged.slice(0, 8));
       }
     } catch (error: any) {
       console.warn('Proactive memory context failed:', error?.message || error);
+    }
+
+    try {
+      if (this.userStateService) {
+        const entry = await this.userStateService.current(userId);
+        stateContext = this.userStateService.formatContext(entry);
+      }
+    } catch (error: any) {
+      console.warn('Proactive user state context failed:', error?.message || error);
     }
 
     try {
@@ -257,7 +282,8 @@ PENTING — BACA KONTEKS DULU:
 2. JANGAN menanyakan hal yang sudah terjawab / sudah dibahas hari ini (mis. user sudah bilang "udah pulang" — jangan tanya "udah pulang belum?").
 3. Kalau topik event ini sudah disinggung user, sambungkan saja secara natural (mis. "tadi katanya udah sampe rumah, gimana?"); jangan tanya ulang.
 4. Perhatikan "Pesan proaktif terkirim baru-baru ini" — JANGAN ulangi pertanyaan/topik yang sama persis.
-5. Kalau konteks tidak punya info terkait, baru tanya yang wajar dan variatif.`;
+5. Kalau konteks tidak punya info terkait, baru tanya yang wajar dan variatif.
+6. Kalau ada "KONDISI TERAKHIR USER", itu status terbaru user (paling akurat) — JANGAN menanyakan ulang kondisi itu. Contoh: kondisi "udah sampai rumah" → DILARANG tanya "masih di kantor?" / "udah pulang?"; sambungkan saja kabar setelahnya.`;
 
     const user = `${clock.promptBlock}
 
@@ -268,7 +294,7 @@ Persona: ${persona ? `${persona.name}, traits=${persona.traits.join(',')}` : 'pa
 ${moodContext ? `Mood:\n${moodContext}\n` : ''}
 Jadwal hari ini:
 ${scheduleContext}
-${conversationContext ? `\nKonteks percakapan:\n${conversationContext}\n` : ''}
+${stateContext ? `\n${stateContext}\n` : ''}${conversationContext ? `\nKonteks percakapan:\n${conversationContext}\n` : ''}
 ${memoryContext ? `\nMemori penting:\n${memoryContext}\n` : ''}
 ${sentProactiveContext ? `\nPesan proaktif terkirim baru-baru ini:\n${sentProactiveContext}\n` : ''}
 `;

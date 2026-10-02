@@ -8,6 +8,7 @@ import { ScheduleService } from '../domain/schedule/service';
 import { MoodService } from '../domain/mood/service';
 import { ConversationService } from '../domain/conversation/service';
 import { ReminderService } from '../domain/reminder/service';
+import { UserStateService } from '../domain/state/service';
 import { BotService } from '../domain/bots/service';
 import { WhatsAppBot } from '../integrations/whatsapp/bot';
 import { Client } from '../core/client';
@@ -26,6 +27,7 @@ export function createApiRouter(deps: {
   botService: BotService;
   whatsappBot: WhatsAppBot;
   client: Client;
+  userStateService: UserStateService;
 }): Router {
   const router = Router();
   const {
@@ -40,6 +42,7 @@ export function createApiRouter(deps: {
     botService,
     whatsappBot,
     client,
+    userStateService,
   } = deps;
 
   // Must match WhatsApp bot storage key (digits-only AUTHORIZED_PHONE)
@@ -107,6 +110,41 @@ export function createApiRouter(deps: {
         agent: client ? 'ready' : 'not ready',
       },
     });
+  });
+
+  // ===== User state (kondisi terkini user: lokasi/aktivitas/status) =====
+  router.get('/state', async (_req, res) => {
+    const uid = userId();
+    try {
+      const current = await userStateService.current(uid);
+      const doc = await userStateService.getDoc(uid);
+      res.json({
+        current,
+        history: (doc?.history || []).slice(-10).reverse(),
+        contextBlock: userStateService.formatContext(current),
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error?.message || 'failed' });
+    }
+  });
+
+  // Uji ekstraksi kondisi dari teks bebas (pipeline yang sama dengan chat WA).
+  router.post('/state/extract', async (req, res) => {
+    const uid = userId();
+    const text = String(req.body?.text || '').trim();
+    if (!text) {
+      res.status(400).json({ error: 'text wajib diisi' });
+      return;
+    }
+    try {
+      const extracted = await memoryService.extract(uid, text);
+      const entry = extracted.userStatus
+        ? await userStateService.apply(uid, extracted.userStatus, text)
+        : null;
+      res.json({ userStatus: extracted.userStatus ?? null, applied: entry });
+    } catch (error: any) {
+      res.status(500).json({ error: error?.message || 'failed' });
+    }
   });
 
   // Tools

@@ -22,6 +22,7 @@ import { ConversationService } from '../../domain/conversation/service';
 import { ProactiveService } from '../../domain/proactive/service';
 import { MoodService } from '../../domain/mood/service';
 import { ReminderService } from '../../domain/reminder/service';
+import { UserStateService } from '../../domain/state/service';
 import { env } from '../../config/env';
 import { extractDocumentText } from '../../utils/documents';
 import { buildClockContext } from '../../utils/time';
@@ -79,7 +80,8 @@ export class WhatsAppBot {
     private conversationService: ConversationService,
     private proactiveService: ProactiveService,
     private moodService: MoodService,
-    private reminderService?: ReminderService
+    private reminderService?: ReminderService,
+    private userStateService?: UserStateService
   ) {}
 
   async start(): Promise<void> {
@@ -951,12 +953,21 @@ export class WhatsAppBot {
 
     if (!isReminderIntent) {
       console.log('🧠 Realtime memory scan (high-importance only)...');
-      const storedMemories = await this.memoryService.extractAndStore(userId, text, {
-        minImportance: env.realtimeMemoryImportanceThreshold,
-        source: 'realtime',
-      });
+      const { stored: storedMemories, userStatus } = await this.memoryService.extractAndStore(
+        userId,
+        text,
+        {
+          minImportance: env.realtimeMemoryImportanceThreshold,
+          source: 'realtime',
+        }
+      );
       if (storedMemories.length) {
         console.log(`✓ Stored ${storedMemories.length} urgent memories`);
+      }
+      // Kondisi terkini user (lokasi/aktivitas/status) — bukan memori jangka panjang
+      if (userStatus && this.userStateService) {
+        const entry = await this.userStateService.apply(userId, userStatus, text);
+        if (entry) console.log(`📍 User state updated: ${entry.status}`);
       }
     } else {
       console.log('⏰ Reminder intent detected — skip realtime memory extract');
@@ -1019,6 +1030,14 @@ export class WhatsAppBot {
         `Sapaan cocok: "${clock.greeting}". ${clock.behaviorHint} ` +
         `JANGAN pakai: ${clock.antiPatterns.map((x) => `"${x}"`).join(', ') || '-'}.`,
     });
+
+    // Kondisi terkini user (mis. "udah sampai rumah") supaya model tidak
+    // menanyakan ulang hal yang sudah dijawab user baru-baru ini.
+    if (this.userStateService) {
+      const userState = await this.userStateService.current(userId).catch(() => null);
+      const stateBlock = this.userStateService.formatContext(userState);
+      if (stateBlock) turnHistory.push({ role: 'system', content: stateBlock });
+    }
 
     if (day.previousDaySummary) {
       turnHistory.push({

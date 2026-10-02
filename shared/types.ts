@@ -68,6 +68,30 @@ export interface MemoryExtractionResult {
     metadata?: Record<string, unknown>;
   }>;
   confidence: number;
+  /** Kondisi terbaru user (lokasi/aktivitas/status) — sementara, TIDAK untuk memori jangka panjang. */
+  userStatus?: UserStatusObservation | null;
+}
+
+export interface UserStatusObservation {
+  changed: boolean;
+  /** Natural pendek bahasa Indonesia, mis. "udah sampai rumah", "masih di kantor". */
+  status: string;
+  kind: 'location' | 'activity' | 'status' | 'other';
+  confidence: number;
+}
+
+export interface UserStateEntry {
+  status: string;
+  kind: string;
+  rawText: string;
+  at: Date;
+}
+
+export interface UserState {
+  userId: string;
+  current: UserStateEntry | null;
+  history: UserStateEntry[];
+  updatedAt: Date;
 }
 
 export interface ToolParameter {

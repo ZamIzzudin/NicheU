@@ -1,4 +1,9 @@
-import { Memory, MemoryCategory, MemoryExtractionResult } from '../../../shared/types';
+import {
+  Memory,
+  MemoryCategory,
+  MemoryExtractionResult,
+  UserStatusObservation,
+} from '../../../shared/types';
 import { Client } from '../../core/client';
 import { Database } from '../../db/mongo';
 import { env } from '../../config/env';
@@ -10,7 +15,7 @@ export class MemoryService {
     userId: string,
     message: string,
     options: { minImportance?: number; source?: string } = {}
-  ): Promise<Memory[]> {
+  ): Promise<{ stored: Memory[]; userStatus: UserStatusObservation | null }> {
     const minImportance = options.minImportance ?? env.memoryImportanceThreshold;
     const extracted = await this.extract(userId, message);
     const stored: Memory[] = [];
@@ -37,7 +42,7 @@ export class MemoryService {
       stored.push(memory);
     }
 
-    return stored;
+    return { stored, userStatus: extracted.userStatus || null };
   }
 
   /**
@@ -119,7 +124,7 @@ Rules:
         source: `nightly:${date}`,
       });
       return {
-        stored: fallback,
+        stored: fallback.stored,
         daySummary: existingDaySummary || '',
       };
     }
@@ -481,6 +486,35 @@ Rules:
     return union ? inter / union : 0;
   }
 
+  /** Indikator + tempat/aktivitas untuk fallback regex (LLM kadang melewatkan kondisi yang jelas). */
+  private static readonly STATUS_INDICATORS =
+    /\b(udah|sudah|sampe|sampai|nyampe|masih|lagi|sedang|nunggu|menunggu|baru|habis|mau|pengen|otw|perjalanan|lembur|pulang|berangkat)\b/i;
+  private static readonly STATUS_SUBJECTS =
+    /\b(rumah|kantor|kos|kost|stasiun|kereta|krl|busway|mrt|bandara|pesawat|jalan|macet|sekolah|kampus|kelas|rapat|meeting|kerja|lembur|makan|minum|olahraga|gym|lari|tidur|bangun|mandi|sakit|pusing|capek|lelah|driving|naik)\b/i;
+
+  /**
+   * Fallback deterministik: cari klausa pendek yang memuat indikator kondisi
+   * (udah/masih/lagi/nunggu/...) DAN kata tempat/aktivitas (rumah/kereta/rapat/...).
+   * Dipakai hanya kalau LLM gagal menangkap kondisi yang seharusnya jelas.
+   */
+  private fallbackStatus(message: string): UserStatusObservation | null {
+    const clauses = message
+      .split(/[,.!?\n;]+/)
+      .map((c) => c.trim())
+      .filter((c) => c.length > 2 && c.length <= 120);
+    for (const clause of clauses) {
+      if (MemoryService.STATUS_INDICATORS.test(clause) && MemoryService.STATUS_SUBJECTS.test(clause)) {
+        return {
+          changed: true,
+          status: clause.toLowerCase(),
+          kind: 'other',
+          confidence: 0.6,
+        };
+      }
+    }
+    return null;
+  }
+
   async extract(userId: string, message: string): Promise<MemoryExtractionResult> {
     const system = `You extract long-term memories from a chat message for a personal partner AI.
 Return ONLY JSON object:
@@ -493,13 +527,31 @@ Return ONLY JSON object:
       "metadata": {}
     }
   ],
+  "userStatus": {
+    "changed": true,
+    "status": "short natural Indonesian phrase",
+    "kind": "location|activity|status|other",
+    "confidence": 0.0
+  },
   "confidence": 0.0
 }
 Rules:
 - Only keep durable facts useful later.
 - Ignore greetings and temporary small talk.
 - importance 0-1; >= ${env.memoryImportanceThreshold} is worth storing.
-- If nothing important, memories=[] and confidence low.`;
+- If nothing important, memories=[] and confidence low.
+- "userStatus" is DIFFERENT from memories: capture the user's CURRENT condition
+  (where they are, what they are doing, how they are) even though it is temporary.
+  Examples: "udah sampai rumah" (location), "masih di kantor, lembur" (location+activity),
+  "lagi makan sama temen" (activity), "lagi sakit, pusing" (status), "habis olahraga" (activity),
+  "nunggu kereta di stasiun" (activity+location), "di jalan pulang" (location),
+  "masih rapat" (activity), "baru bangun" / "mau tidur" (status).
+  Write "status" as a short natural Indonesian phrase the user would say.
+  Set changed=true only when the message REVEALS the user's condition;
+  set userStatus=null when the message says nothing about it.
+  When unsure whether the message reveals a condition, PREFER changed=true
+  (better to update state than to miss it). Pure reactions/jokes/replies
+  with zero condition info (e.g. "wkwk lucu", "iyaa sayang") stay null.`;
 
     try {
       const result = await this.client.chat(
@@ -515,6 +567,20 @@ Rules:
 
       const parsed = JSON.parse(this.cleanJson(result.content));
       const memories = Array.isArray(parsed.memories) ? parsed.memories : [];
+      const rawStatus = parsed.userStatus;
+      let userStatus: UserStatusObservation | null =
+        rawStatus && typeof rawStatus === 'object' && rawStatus.changed && rawStatus.status
+          ? {
+              changed: true,
+              status: String(rawStatus.status).trim().slice(0, 120),
+              kind: ['location', 'activity', 'status', 'other'].includes(rawStatus.kind)
+                ? rawStatus.kind
+                : 'other',
+              confidence: Math.min(1, Math.max(0, Number(rawStatus.confidence) || 0.5)),
+            }
+          : null;
+      // LLM kadang melewatkan kondisi yang jelas — fallback regex sebagai lantai pengaman.
+      if (!userStatus) userStatus = this.fallbackStatus(message);
       return {
         memories: memories
           .filter((m: any) => m && typeof m.content === 'string')
@@ -525,6 +591,7 @@ Rules:
             metadata: m.metadata || {},
           })),
         confidence: Number(parsed.confidence) || (memories.length ? 0.7 : 0.2),
+        userStatus,
       };
     } catch (error) {
       console.warn('Memory extraction failed:', (error as Error).message);
@@ -608,6 +675,21 @@ Rules:
     const results = await this.db.memories
       .find({ userId })
       .sort({ importance: -1, updatedAt: -1, createdAt: -1 })
+      .limit(Math.min(20, Math.max(1, limit)))
+      .toArray();
+    await this.touch(results);
+    return results;
+  }
+
+  /**
+   * Memori TERBARU (urut waktu), bukan terpenting — untuk konteks pesan
+   * proaktif supaya fakta segar hari ini ikut terbawa walau importance-nya
+   * biasa saja.
+   */
+  async latest(userId: string, limit = 5): Promise<Memory[]> {
+    const results = await this.db.memories
+      .find({ userId })
+      .sort({ updatedAt: -1, createdAt: -1 })
       .limit(Math.min(20, Math.max(1, limit)))
       .toArray();
     await this.touch(results);

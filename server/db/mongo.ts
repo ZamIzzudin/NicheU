@@ -11,6 +11,7 @@ import {
   Reminder,
   Tool,
   ToolExecution,
+  UserState,
 } from '../../shared/types';
 import { env } from '../config/env';
 
@@ -28,6 +29,7 @@ export class Database {
   moods!: Collection<DailyMood>;
   reminders!: Collection<Reminder>;
   bots!: Collection<AutomationBot>;
+  userStates!: Collection<UserState>;
   botRuns!: Collection<BotRun>;
   meta!: Collection<{ _id: string; value: unknown; updatedAt: Date }>;
 
@@ -49,6 +51,7 @@ export class Database {
     this.moods = this.db.collection<DailyMood>('daily_moods');
     this.reminders = this.db.collection<Reminder>('reminders');
     this.bots = this.db.collection<AutomationBot>('bots');
+    this.userStates = this.db.collection<UserState>('user_states');
     this.botRuns = this.db.collection<BotRun>('bot_runs');
     this.meta = this.db.collection('meta');
 
@@ -66,6 +69,7 @@ export class Database {
       this.moods.createIndex({ userId: 1, date: 1 }, { unique: true }),
       this.moods.createIndex({ userId: 1, updatedAt: -1 }),
       this.reminders.createIndex({ id: 1 }, { unique: true }),
+      this.userStates.createIndex({ userId: 1 }, { unique: true }),
       this.reminders.createIndex({ userId: 1, status: 1, dueAt: 1 }),
       this.reminders.createIndex({ status: 1, dueAt: 1 }),
       this.reminders.createIndex({ userId: 1, updatedAt: -1 }),
