@@ -126,23 +126,28 @@ export class ToolRegistry {
     ctx?: ExecContext
   ): Promise<ToolResult[]> {
     const mergedCtx = { ...this.context, ...ctx };
-    const results: ToolResult[] = [];
 
-    for (const call of calls) {
-      try {
-        const args = this.parseArgs(call.argumentsStr);
-        const output = await this.execute(call.name, args, mergedCtx);
-        results.push({
-          id: call.id,
-          output: typeof output === 'string' ? output : JSON.stringify(output, null, 2),
-        });
-      } catch (error: any) {
-        results.push({
-          id: call.id,
-          output: JSON.stringify({ success: false, error: error.message || String(error) }),
-        });
-      }
-    }
+    // Independent tool calls in one model batch run CONCURRENTLY (they are
+    // I/O bound: mongo lookups, LLM calls, isolated child processes).
+    // Promise.all preserves call order in the resolved array; each call keeps
+    // its own try/catch so one failure never poisons the batch.
+    const results = await Promise.all(
+      calls.map(async (call) => {
+        try {
+          const args = this.parseArgs(call.argumentsStr);
+          const output = await this.execute(call.name, args, mergedCtx);
+          return {
+            id: call.id,
+            output: typeof output === 'string' ? output : JSON.stringify(output, null, 2),
+          } as ToolResult;
+        } catch (error: any) {
+          return {
+            id: call.id,
+            output: JSON.stringify({ success: false, error: error.message || String(error) }),
+          } as ToolResult;
+        }
+      })
+    );
 
     return results;
   }
