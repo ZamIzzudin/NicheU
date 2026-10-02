@@ -39,13 +39,13 @@ const MOOD_META: Record<
     baseEnergy: 0.45,
   },
   fokus: {
-    emoji: '🎯',
+    emoji: '🧐',
     speechHint: 'Lebih to-the-point, sedikit serius, tetap peduli.',
     baseValence: 0.15,
     baseEnergy: 0.65,
   },
   semangat: {
-    emoji: '🔥',
+    emoji: '🤩',
     speechHint: 'Energik, antusias, ajak ngobrol aktif.',
     baseValence: 0.8,
     baseEnergy: 0.9,

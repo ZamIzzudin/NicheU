@@ -23,6 +23,7 @@ import { ProactiveService } from '../../domain/proactive/service';
 import { MoodService } from '../../domain/mood/service';
 import { ReminderService } from '../../domain/reminder/service';
 import { UserStateService } from '../../domain/state/service';
+import { sanitizeEmojis } from '../../utils/emoji';
 import { env } from '../../config/env';
 import { extractDocumentText } from '../../utils/documents';
 import { buildClockContext } from '../../utils/time';
@@ -230,7 +231,10 @@ export class WhatsAppBot {
 
   private async sendTextBubbles(jid: string, text: string): Promise<void> {
     if (!this.socket) throw new Error('WhatsApp socket not ready');
-    const bubbles = this.splitIntoBubbles(text);
+    // Filter emoji non-manusia (🍕🐟🎯 dsb) — deterministic, semua jalur kirim
+    // (balasan chat, proaktif, reminder, notifikasi bot) lewat sini.
+    const safeText = sanitizeEmojis(text);
+    const bubbles = this.splitIntoBubbles(safeText);
     if (!bubbles.length) return;
 
     for (let i = 0; i < bubbles.length; i++) {
