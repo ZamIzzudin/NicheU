@@ -7,6 +7,7 @@
     "dev:server": "ts-node-dev --respawn --transpile-only server/index.ts",
     "dev:web": "cd web && npm run dev -- -p 3001",
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:web\"",
+    "test:sandbox": "node --test server/domain/tools/sandbox.test.cjs",
     "build:server": "tsc",
     "build:web": "cd web && npm run build",
     "build": "npm run build:server && npm run build:web",
